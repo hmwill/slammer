@@ -100,8 +100,8 @@ public:
         return *this;
     }
 
-    bool is_ok() const { return std::holds_alternative<Value>(result_); }
-    bool is_error() const { return std::holds_alternative<Error>(result_); }
+    bool ok() const { return std::holds_alternative<Value>(result_); }
+    bool failed() const { return std::holds_alternative<Error>(result_); }
 
     const Value& value() const { return std::get<Value>(result_); }
     const Error& error() const { return std::get<Error>(result_); }

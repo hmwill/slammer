@@ -28,44 +28,33 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <stdexcept>
+#ifndef SLAMMER_LORIS_ARROW_UTILS_H
+#define SLAMMER_LORIS_ARROW_UTILS_H
 
-#include <gtest/gtest.h>
+#pragma once
+
+#include "arrow/api.h"
 
 #include "slammer/slammer.h"
 
-using namespace slammer;
+namespace slammer {
+namespace loris {
 
-TEST(SlammerTests, TestError) {
-    Error err1("This is a message");
-    EXPECT_EQ(err1.message(), std::string("This is a message"));
+using DataTypePointer = std::shared_ptr<arrow::DataType>;
+using TablePointer = std::shared_ptr<arrow::Table>;
+using SchemaPointer = std::shared_ptr<arrow::Schema>;
 
-    try {
-        throw std::logic_error("This is the what");
-    }
-    catch (...) {
-        Error error = Error::FromCurrentException();
-        EXPECT_EQ(error.message(), std::string("This is the what"));
-    }
-}
+/// Read a text data file from the LORIS data set into an Apache Arrow table.
+///
+/// \param path         The file location on disk
+/// \param schema       The schema describing the columns of the data file
+/// \param io_context   The arrow I/O context within which to perform this operation
+///
+/// \returns The resulting Table or and an error.
+Result<TablePointer> ReadLorisTable(const std::string& path, const SchemaPointer& schema,
+                                    const arrow::io::IOContext& io_context);
 
-TEST(SlammerTests, TestResult) {
-    Result<int> ok_result { 10 };
-    Result<int> fail_result { std::string("This is an error") };
+} // loris
+} // namespace slammer
 
-    EXPECT_TRUE(ok_result.ok());
-    EXPECT_FALSE(ok_result.failed());
-    EXPECT_EQ(ok_result.value(), 10);
-
-    EXPECT_FALSE(fail_result.ok());
-    EXPECT_TRUE(fail_result.failed());
-    EXPECT_EQ(fail_result.error().message(), std::string("This is an error"));
-
-    Result copy_ok(ok_result);
-    EXPECT_EQ(copy_ok.value(), 10);
-
-    Result move_ok(std::move(ok_result));
-    EXPECT_EQ(move_ok.value(), 10);
-    EXPECT_FALSE(ok_result.ok());
-    EXPECT_FALSE(ok_result.failed());
-}
+#endif //ndef SLAMMER_LORIS_ARROW_UTILS_H
