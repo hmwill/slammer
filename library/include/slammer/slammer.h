@@ -39,6 +39,7 @@
 
 namespace slammer {
 
+/// The `overloaded` operator, see [Example 4](https://en.cppreference.com/w/cpp/utility/variant/visit).
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
 // explicit deduction guide (not needed as of C++20)
 template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
@@ -106,7 +107,7 @@ public:
     const Error& error() const { return std::get<Error>(result_); }
 
 private:
-    std::variant<Value, Error> result_;
+    std::variant<std::monostate, Value, Error> result_;
 };
 
 } // namespace slammer

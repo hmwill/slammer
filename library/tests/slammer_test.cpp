@@ -66,5 +66,6 @@ TEST(SlammerTests, TestResult) {
 
     Result move_ok(std::move(ok_result));
     EXPECT_EQ(move_ok.value(), 10);
-    EXPECT_EQ(ok_result.value(), 0);
+    EXPECT_FALSE(ok_result.is_ok());
+    EXPECT_FALSE(ok_result.is_error());
 }
