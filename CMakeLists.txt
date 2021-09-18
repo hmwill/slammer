@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 enable_testing()
 find_package(GTest REQUIRED)
+include(Dart)
 
 find_package(Arrow 5.0 REQUIRED)
 find_package(Eigen3 3.3 REQUIRED)
