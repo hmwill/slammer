@@ -52,7 +52,8 @@ using SchemaPointer = std::shared_ptr<arrow::Schema>;
 ///
 /// \returns The resulting Table or and an error.
 Result<TablePointer> ReadLorisTable(const std::string& path, const SchemaPointer& schema,
-                                    const arrow::io::IOContext& io_context);
+                                    const arrow::io::IOContext& io_context,
+                                    bool first_row_is_comment = true);
 
 } // loris
 } // namespace slammer

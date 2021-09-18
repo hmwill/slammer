@@ -65,7 +65,8 @@ std::unordered_map<std::string, DataTypePointer> GetColumnTypes(const SchemaPoin
 
 Result<TablePointer> 
 slammer::loris::ReadLorisTable(const std::string &path, const SchemaPointer &schema,
-                               const arrow::io::IOContext &io_context) {
+                               const arrow::io::IOContext &io_context,
+                               bool first_row_is_comment) {
     auto localfs = std::make_shared<arrow::fs::LocalFileSystem>();
     auto maybe_input = localfs->OpenInputStream(path);
 
@@ -78,6 +79,7 @@ slammer::loris::ReadLorisTable(const std::string &path, const SchemaPointer &sch
     auto read_options = arrow::csv::ReadOptions::Defaults();
     read_options.column_names = GetColumnNames(schema);
     read_options.autogenerate_column_names = false;
+    read_options.skip_rows = first_row_is_comment ? 1 : 0;
     
     auto parse_options = arrow::csv::ParseOptions::Defaults();
     parse_options.delimiter = ' ';
