@@ -28,24 +28,61 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef SLAMMER_LORIS_SCHEMA_H
-#define SLAMMER_LORIS_SCHEMA_H
+#ifndef SLAMMER_LORIS_DRIVER_H
+#define SLAMMER_LORIS_DRIVER_H
 
 #pragma once
 
-#include "arrow/api.h"
+#include "slammer/slammer.h"
+#include "slammer/events.h"
+
+#include <optional>
+
+#include "arrow/io/api.h"
+
 
 namespace slammer {
 namespace loris {
 
-extern std::shared_ptr<arrow::Schema> image_schema;
-extern std::shared_ptr<arrow::Schema> accelerometer_schema;
-extern std::shared_ptr<arrow::Schema> gyroscope_schema;
+class Driver;
+class AbstractEventSource;
 
-extern std::shared_ptr<arrow::Schema> groundtruth_schema;
-extern std::shared_ptr<arrow::Schema> odom_schema;
+struct HeapEntry {
+    Timestamp timestamp;
+    std::unique_ptr<AbstractEventSource> event_source;
+};
+
+class Driver {
+public:
+    Driver(const std::string& path, arrow::io::IOContext io_context);
+    ~Driver();
+
+    Result<size_t> Run(const std::optional<Timestamp> max_duration = {}, 
+                       const std::optional<size_t> max_num_events = {});
+
+    const std::string& path() const { return path_; }
+    arrow::io::IOContext io_context() const { return io_context_; }
+
+    EventListenerList<AccelerometerEvent> d400_accelerometer;
+    EventListenerList<GyroscopeEvent> d400_gyroscope;
+    EventListenerList<ImageEvent> aligned_depth;
+    EventListenerList<ImageEvent> depth;
+    EventListenerList<ImageEvent> color;
+
+    EventListenerList<AccelerometerEvent> t265_accelerometer;
+    EventListenerList<GyroscopeEvent> t265_gyroscope;
+    EventListenerList<ImageEvent> fisheye1;
+    EventListenerList<ImageEvent> fisheye2;
+
+private:
+    std::optional<Error> AddEventSource(std::unique_ptr<AbstractEventSource>&& event_source);
+
+    std::string path_;
+    std::vector<HeapEntry> timestamp_heap_;
+    arrow::io::IOContext io_context_;
+};
 
 } // namespace loris
 } // namespace slammer
 
-#endif //ndef SLAMMER_LORIS_SCHEMA_H
+#endif //ndef SLAMMER_LORIS_DRIVER_H

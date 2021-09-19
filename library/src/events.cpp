@@ -28,24 +28,5 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#ifndef SLAMMER_LORIS_SCHEMA_H
-#define SLAMMER_LORIS_SCHEMA_H
+#include "slammer/events.h"
 
-#pragma once
-
-#include "arrow/api.h"
-
-namespace slammer {
-namespace loris {
-
-extern std::shared_ptr<arrow::Schema> image_schema;
-extern std::shared_ptr<arrow::Schema> accelerometer_schema;
-extern std::shared_ptr<arrow::Schema> gyroscope_schema;
-
-extern std::shared_ptr<arrow::Schema> groundtruth_schema;
-extern std::shared_ptr<arrow::Schema> odom_schema;
-
-} // namespace loris
-} // namespace slammer
-
-#endif //ndef SLAMMER_LORIS_SCHEMA_H

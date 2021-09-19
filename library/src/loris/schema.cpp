@@ -59,16 +59,9 @@ std::shared_ptr<arrow::Schema> CreateGyroscopeSchema() {
 
 } // namespace
 
-std::shared_ptr<arrow::Schema> slammer::loris::aligned_depth_schema = CreateImageListSchema();
-std::shared_ptr<arrow::Schema> slammer::loris::color_schema = CreateImageListSchema();
-std::shared_ptr<arrow::Schema> slammer::loris::d400_accelerometer_schema = CreateAccelerometerSchema();
-std::shared_ptr<arrow::Schema> slammer::loris::d400_gyroscope_schema = CreateGyroscopeSchema();
-std::shared_ptr<arrow::Schema> slammer::loris::depth_schema = CreateImageListSchema();
-
-std::shared_ptr<arrow::Schema> slammer::loris::fisheye1_schema = CreateImageListSchema();
-std::shared_ptr<arrow::Schema> slammer::loris::fisheye2_schema = CreateImageListSchema();
-std::shared_ptr<arrow::Schema> slammer::loris::t265_accelerometer_schema = CreateAccelerometerSchema();
-std::shared_ptr<arrow::Schema> slammer::loris::t265_gyroscope_schema = CreateGyroscopeSchema();
+std::shared_ptr<arrow::Schema> slammer::loris::image_schema = CreateImageListSchema();
+std::shared_ptr<arrow::Schema> slammer::loris::accelerometer_schema = CreateAccelerometerSchema();
+std::shared_ptr<arrow::Schema> slammer::loris::gyroscope_schema = CreateGyroscopeSchema();
 
 namespace {
 

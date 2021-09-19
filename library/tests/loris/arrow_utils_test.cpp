@@ -42,7 +42,7 @@ using namespace slammer::loris;
 
 TEST(SlammerLorisTests, ArrowUtils_ReadLorisTableMissingFile) {
     arrow::io::IOContext io_context = arrow::io::default_io_context();
-    auto result = ReadLorisTable(std::string("Ivalid file name"), aligned_depth_schema,
+    auto result = ReadLorisTable(std::string("Ivalid file name"), image_schema,
                                  io_context);
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.error().message(), std::string("Failed to open local file 'Ivalid file name'"));
@@ -50,7 +50,7 @@ TEST(SlammerLorisTests, ArrowUtils_ReadLorisTableMissingFile) {
 
 TEST(SlammerLorisTests, ArrowUtils_ReadAlignedDepth) {
     arrow::io::IOContext io_context = arrow::io::default_io_context();
-    auto result = ReadLorisTable(std::string("data/cafe1-1/aligned_depth.txt"), aligned_depth_schema,
+    auto result = ReadLorisTable(std::string("data/cafe1-1/aligned_depth.txt"), image_schema,
                                  io_context, false);
     EXPECT_TRUE(result.ok());
     
@@ -95,7 +95,7 @@ TEST(SlammerLorisTests, ArrowUtils_ReadAlignedDepth) {
 
 TEST(SlammerLorisTest, ArrowUtils_ReadAccelerometer) {
     arrow::io::IOContext io_context = arrow::io::default_io_context();
-    auto result = ReadLorisTable(std::string("data/cafe1-1/d400_accelerometer.txt"), d400_accelerometer_schema,
+    auto result = ReadLorisTable(std::string("data/cafe1-1/d400_accelerometer.txt"), accelerometer_schema,
                                  io_context);
     EXPECT_TRUE(result.ok());
     auto table = result.value();
