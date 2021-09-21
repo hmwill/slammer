@@ -42,7 +42,7 @@ namespace loris {
 
 struct CommonParameters {
     std::string sensor_name;
-    int fps;                            // e.g. 0
+    int fps;
 };
 
 struct CameraParameters: public CommonParameters {
@@ -60,11 +60,9 @@ struct ImuParameters: public CommonParameters {
     cv::Mat bias_variances;
 };
 
-struct OdometerParameters: public CommonParameters {
-};
+struct OdometerParameters: public CommonParameters {};
 
 /// The sensor calibration information provided with the data sets
-// https://docs.opencv.org/4.5.3/dd/d74/tutorial_file_input_output_with_xml_yml.html
 struct SensorInfo {
     CameraParameters d400_color_optical_frame;
     CameraParameters d400_depth_optical_frame;
