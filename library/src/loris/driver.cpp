@@ -200,7 +200,7 @@ public:
     virtual std::optional<Error> FireEvent() override {
         auto image_name = GetStringArrayValue(1, chunk_indices[1], array_indices[1]);
         std::string full_path = driver_.path() + "/" + image_name;
-        auto image = std::make_shared<cv::Mat>(cv::imread(full_path));
+        auto image = std::make_shared<cv::Mat>(cv::imread(full_path, cv::IMREAD_UNCHANGED));
 
         if (image->empty()) {
             std::string error_message = "Could not read image file " + full_path;
