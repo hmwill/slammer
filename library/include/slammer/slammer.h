@@ -37,6 +37,8 @@
 #include <string>
 #include <variant>
 
+using namespace std::string_literals;
+
 namespace slammer {
 
 /// The `overloaded` operator, see [Example 4](https://en.cppreference.com/w/cpp/utility/variant/visit).

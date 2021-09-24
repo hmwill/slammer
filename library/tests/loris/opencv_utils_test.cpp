@@ -69,5 +69,21 @@ TEST(SlammerLorisTest, OpenCvUtils_ReadSensorInfo) {
 
     EXPECT_EQ(sensor_info.odometer.fps, 0);
     EXPECT_EQ(sensor_info.odometer.sensor_name, "odometer");
-
 }
+
+TEST(SlammerLorisTest, OpenCvUtils_ReadFrames) {
+    auto result = ReadFrames("data/cafe1-1");
+
+    EXPECT_TRUE(result.ok());
+    const auto& transformations = result.value();
+    EXPECT_EQ(transformations.size(), 9);
+
+    auto frame_iter = transformations.find("d400_depth_optical_frame");
+    EXPECT_NE(frame_iter, transformations.end());
+    EXPECT_EQ(frame_iter->second.name, "d400_depth_optical_frame");
+    EXPECT_EQ(frame_iter->second.parent_name, "d400_color_optical_frame");
+    EXPECT_EQ(frame_iter->second.transformation.rows, 4);
+    EXPECT_EQ(frame_iter->second.transformation.cols, 4);
+    EXPECT_EQ(frame_iter->second.transformation.at<double>(1, 2), -3.5019440527251228e-03);
+}
+

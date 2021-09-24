@@ -34,6 +34,10 @@
 #pragma once
 
 #include "slammer/slammer.h"
+
+#include <string>
+#include <unordered_map>
+
 #include "opencv2/opencv.hpp"
 
 
@@ -77,6 +81,20 @@ struct SensorInfo {
 
 /// Read the sensor information for the dataset identrified by the provided path
 Result<SensorInfo> ReadSensorInfo(const std::string& dataset_path);
+
+using FrameName = std::string;
+
+struct Frame {
+    FrameName name;
+    FrameName parent_name;
+    cv::Mat transformation;
+};
+
+extern const std::string kBaseLink;
+
+using FrameSet = std::unordered_map<FrameName, Frame>;
+
+Result<FrameSet> ReadFrames(const std::string& transformations_path);
 
 } // namespace loris
 } // namespace slammer

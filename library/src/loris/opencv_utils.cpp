@@ -98,6 +98,18 @@ std::optional<Error> ReadOdometerParameters(const cv::FileNode& node, OdometerPa
     return ReadCommonParameters(node, odometer);
 }
 
+std::optional<Error> ReadFrame(const cv::FileNode& node, Frame& frame) {
+    if (!node.isMap()) {
+        return Error("Expected a map to describe parameters of a frame transformation");
+    }
+
+    node["parent_frame"] >> frame.parent_name;
+    node["child_frame"] >> frame.name;
+    node["matrix"] >> frame.transformation;
+
+    return {};
+}
+
 } // namespace 
 
 Result<SensorInfo> slammer::loris::ReadSensorInfo(const std::string& dataset_path) {
@@ -148,3 +160,47 @@ Result<SensorInfo> slammer::loris::ReadSensorInfo(const std::string& dataset_pat
 
     return result;
 }
+
+
+
+Result<FrameSet> slammer::loris::ReadFrames(const std::string& transformations_path) {
+    FrameSet result;
+
+    cv::FileStorage fs;
+    std::string full_path = transformations_path + "/trans_matrix.yaml";
+    if (!fs.open(full_path, cv::FileStorage::READ)) {
+        std::string message = "Could not open YAML file " + full_path; 
+        return Error(message);
+    }
+
+    auto frame_list = fs["trans_matrix"];
+    if (!frame_list.isSeq()) {
+        std::string message = "Missing list of transformation frames in YAML file " + full_path; 
+        return Error(message);
+    }
+
+    for (auto iter = frame_list.begin(), end = frame_list.end(); iter != end; ++iter) {
+        Frame frame;
+
+        if (auto maybe_error = ReadFrame(*iter, frame)) {
+            return maybe_error.value();
+        }
+
+        result[frame.name] = frame;
+    }
+
+    // validation; all parent frames other than "base_link" should have been provided
+
+    for (const auto& element: result) {
+        if (element.second.parent_name != kBaseLink) {
+            if (result.find(element.second.parent_name) == result.end()) {
+                std::string message = "Missing parent frame for transformation " + element.second.name; 
+                return Error(message);
+            }
+        }
+    }
+
+    return result;
+}
+
+const FrameName slammer::loris::kBaseLink { "base_link" };
