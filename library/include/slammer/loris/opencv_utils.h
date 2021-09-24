@@ -79,7 +79,7 @@ struct SensorInfo {
     OdometerParameters odometer;
 };
 
-/// Read the sensor information for the dataset identrified by the provided path
+/// Read the sensor information for the dataset identified by the provided path
 Result<SensorInfo> ReadSensorInfo(const std::string& dataset_path);
 
 using FrameName = std::string;
@@ -94,6 +94,7 @@ extern const std::string kBaseLink;
 
 using FrameSet = std::unordered_map<FrameName, Frame>;
 
+/// Read the frame transformation information for the dataset identified by the provided path
 Result<FrameSet> ReadFrames(const std::string& transformations_path);
 
 } // namespace loris
