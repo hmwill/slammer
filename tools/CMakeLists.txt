@@ -1,1 +1,2 @@
 add_subdirectory(slammer_gui)
+add_subdirectory(viewer)
