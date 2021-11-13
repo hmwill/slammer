@@ -3,6 +3,8 @@ project(slammer)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
+# The following define enables c-style math macros in C++; used by Sophus
+add_definitions(-D_USE_MATH_DEFINES)
 
 enable_testing()
 find_package(GTest REQUIRED)

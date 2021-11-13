@@ -64,10 +64,10 @@ public:
         width_(width), height_(height), channels_(channels), type_(type) {}
 
     void Callback(const ImageEvent& event) {
-        EXPECT_EQ(event.image->cols, width_);
-        EXPECT_EQ(event.image->rows, height_);
-        EXPECT_EQ(event.image->channels(), channels_);
-        EXPECT_EQ(event.image->type(), type_);
+        EXPECT_EQ(event.image.cols, width_);
+        EXPECT_EQ(event.image.rows, height_);
+        EXPECT_EQ(event.image.channels(), channels_);
+        EXPECT_EQ(event.image.type(), type_);
     }
 
 private:
@@ -98,7 +98,7 @@ TEST(SlammerLorisTest, DriverTest) {
     driver.aligned_depth.AddHandler(std::bind(&ImageChecker::Callback, &aligned_depth_checker, _1));
 
     // run for 2 secs of simulated events
-    auto result = driver.Run(2.0);
+    auto result = driver.Run(slammer::Timediff(2.0));
     EXPECT_TRUE(result.ok());
 
     EXPECT_EQ(d400_accelerometer.events.size(), 20);

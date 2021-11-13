@@ -71,7 +71,7 @@ public:
         auto chunk = columns_[0]->chunk(chunk_indices[0]);
         auto double_array = dynamic_cast<arrow::NumericArray<arrow::DoubleType> *>(chunk.get());
 
-        return double_array->Value(array_indices[0]);
+        return Timestamp { Timediff {  double_array->Value(array_indices[0]) } };
     }
 
     double GetDoubleArrayValue(int column_index, int& chunk_index, int& array_index) {
@@ -85,6 +85,10 @@ public:
         }
 
         return result;
+    }
+
+    Timestamp GetTimestampArrayValue(int column_index, int& chunk_index, int& array_index) {
+        return Timestamp { Timediff { GetDoubleArrayValue(column_index, chunk_index, array_index) } };
     }
 
     std::string GetStringArrayValue(int column_index, int& chunk_index, int& array_index) {
@@ -138,7 +142,7 @@ public:
 
     virtual std::optional<Error> FireEvent() override {
         AccelerometerEvent event {
-            GetDoubleArrayValue(0, chunk_indices[0], array_indices[0]),
+            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
             Vector3d {
                 GetDoubleArrayValue(1, chunk_indices[1], array_indices[1]),
                 GetDoubleArrayValue(2, chunk_indices[2], array_indices[2]),
@@ -169,7 +173,7 @@ public:
 
     virtual std::optional<Error> FireEvent() override {
         GyroscopeEvent event {
-            GetDoubleArrayValue(0, chunk_indices[0], array_indices[0]),
+            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
             Vector3d {
                 GetDoubleArrayValue(1, chunk_indices[1], array_indices[1]),
                 GetDoubleArrayValue(2, chunk_indices[2], array_indices[2]),
@@ -200,15 +204,15 @@ public:
     virtual std::optional<Error> FireEvent() override {
         auto image_name = GetStringArrayValue(1, chunk_indices[1], array_indices[1]);
         std::string full_path = driver_.path() + "/" + image_name;
-        auto image = std::make_shared<cv::Mat>(cv::imread(full_path, cv::IMREAD_UNCHANGED));
+        auto image = cv::imread(full_path, cv::IMREAD_UNCHANGED);
 
-        if (image->empty()) {
+        if (image.empty()) {
             std::string error_message = "Could not read image file " + full_path;
             return Error(error_message);
         }
 
         ImageEvent event {
-            GetDoubleArrayValue(0, chunk_indices[0], array_indices[0]),
+            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
             image
         };
 
@@ -246,7 +250,7 @@ inline std::optional<Error> Driver::AddEventSource(std::unique_ptr<AbstractEvent
     return {};
 }
 
-Result<size_t> Driver::Run(const std::optional<Timestamp> max_duration, 
+Result<size_t> Driver::Run(const std::optional<Timediff> max_duration, 
                            const std::optional<size_t> max_num_events) {
     size_t max_processed_events = max_num_events.value_or(std::numeric_limits<size_t>::max());
 

@@ -33,13 +33,48 @@
 
 #pragma once
 
+#include <cassert>
+#include <chrono>
 #include <exception>
 #include <string>
 #include <variant>
+#include <future>
+
+#include "opencv2/opencv.hpp"
+#include "sophus/se3.hpp"
 
 using namespace std::string_literals;
 
 namespace slammer {
+
+// Common types related to time and space
+
+/// Representation of time differences
+using Timediff = std::chrono::duration<double>;
+
+/// Representation of absolute time (in seconds, relative to standard OS epoch)
+using Timestamp = std::chrono::time_point<std::chrono::system_clock, Timediff>;
+
+/// 2-d coordinates used to address pixels in images
+using Point2f = cv::Point2f;
+
+/// 3-d vector type
+using Vector3d = Eigen::Vector3d;
+
+/// 3-d matrix type
+using Matrix3d = Eigen::Matrix3d;
+
+/// Mathematical affine transformation type for SE(3)
+using SE3d = Sophus::SE3d;
+
+/// 3-d point coordinate representation
+using Point3d = SE3d::Point;
+
+/// Associated 4-by-4 matrix representation of affine transformations
+using Transformation = SE3d::Transformation;
+
+/// Quaternion type to represent rotations
+using Quaterniond = SE3d::QuaternionType;
 
 /// The `overloaded` operator, see [Example 4](https://en.cppreference.com/w/cpp/utility/variant/visit).
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
@@ -83,6 +118,8 @@ class Result {
 public:
     using Value = V;
     using Error = E;
+
+    //Result(): result_(Value {}) {}
 
     Result(const Result& other): result_(other.result_) { }
     Result(Result&& other) { std::swap(result_, other.result_); }

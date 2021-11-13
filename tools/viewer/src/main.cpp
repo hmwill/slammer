@@ -56,8 +56,8 @@ Result<cv::Mat> GetImage(const std::string& path) {
     auto image = cv::imread(path, cv::IMREAD_UNCHANGED);
 
     if (image.empty()) {
-            std::string error_message = "Could not read image file " + path;
-            return Error(error_message);
+        std::string error_message = "Could not read image file " + path;
+        return Error(error_message);
     } else {
         return image;
     }

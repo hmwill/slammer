@@ -57,7 +57,7 @@ public:
     Driver(const std::string& path, arrow::io::IOContext io_context);
     ~Driver();
 
-    Result<size_t> Run(const std::optional<Timestamp> max_duration = {}, 
+    Result<size_t> Run(const std::optional<Timediff> max_duration = {}, 
                        const std::optional<size_t> max_num_events = {});
 
     const std::string& path() const { return path_; }
