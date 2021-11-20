@@ -35,6 +35,8 @@
 
 #include "slammer/slammer.h"
 
+#include <random>
+
 #include "opencv2/features2d.hpp"
 
 #include "slammer/camera.h"
@@ -52,16 +54,24 @@ struct RgbdFrameData {
     Timestamp time_depth;
 };
 
+struct RgbdCameraInfo {
+    const Camera * rgb;
+    const Camera * depth;
+};
+
 /// Representation of a frame that the frontend creates for backend processing
 struct RgbdFrameEvent: public Event {
     // estimated pose for this frame
     Sophus::SE3d pose;
 
     // Locations of feature points within the image (relative to left RGB)
-    std::vector<Point2f> features;
+    std::vector<cv::KeyPoint> keypoints;
 
     // Frame data
     RgbdFrameData frame_data;
+
+    // Camera info
+    RgbdCameraInfo info;
 };
 
 /// Tracking frontend using RGBD camera images
@@ -94,11 +104,27 @@ public:
         // the number of mimap levels to generate for optical flow calculation
         int flow_pyramid_levels = 3;
 
+        // ICP iteration limit
+        size_t max_iterations = 30;
+        
+        // ICP sample size
+        size_t sample_size = 10;
+        
+        /// ICP outlier factor
+        double outlier_factor = 7.16;
+
         int num_features = 200;
         int num_features_init = 100;
         int num_features_tracking = 50;
         int num_features_tracking_bad = 20;
         int num_features_needed_for_keyframe = 80;
+
+        // max distance between keyframes
+        // Issue: how to determine units?
+        double max_keyframe_distance = 10.0;
+
+        // seed value for random number generator
+        int seed = 12345;
     };
 
     /// How lost are we?
@@ -109,8 +135,8 @@ public:
         /// Successfully tracking with sufficient frame-to-frame information
         kTracking,
 
-        /// Insufficient information carry-over across frames; need to start up again
-        kTrackingLost,
+        /// Need to create a new keyframe
+        kNewKeyframe,
     };
 
     /// determine whether color or depth image trigger processing of the next frame
@@ -140,11 +166,26 @@ private:
     /// Process the next frame and create an updated pose estimation
     void ProcessFrame();
 
-    /// Run the feature detector on the RGB data and extract the list of keypoints
-    void DetectFeatures(const RgbdFrameData& frame_data, KeyPoints& key_points);
+    /// Run the feature detector on the RGB data and extract keyframe feature points
+    size_t DetectKeyframeFeatures();
+
+    /// Run the feature detector on the RGB data and extract additional keypoints
+    size_t DetectAdditionalFeatures();
 
     /// Use optical flow to find the key points detected in the previous frame in the current frame
-    void FindFeatureInCurrent(std::vector<Point2f>& points, std::vector<unsigned char>& mask);
+    size_t FindFeaturesInCurrent(std::vector<Point2f>& points);
+
+    /// Track previously identified features in a new frame to process
+    size_t TrackFeatures();
+
+    /// Use an estimated camera pose and depth information to predict key point positions
+    void PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vector<Point2f>& points);
+
+    // Reset all feature vectors
+    void ClearFeatureVectors();
+
+    // Trigger a key frame event using the current frame and tracking information
+    void PostKeyframe();
 
     Parameters parameters_;
 
@@ -160,14 +201,32 @@ private:
     /// Current processing status
     Status status_;
 
+    /// Pose associated with the previous frame
+    Sophus::SE3d current_pose_;
+
     /// Camera data per frame to be processed
     RgbdFrameData current_frame_data_;
+
+    /// Pose associated with the previous frame
+    Sophus::SE3d previous_pose_;
+
+    /// Pose associated with the most recent key frame
+    Sophus::SE3d last_keyframe_pose_;
 
     /// Previous frame data
     RgbdFrameData previous_frame_data_;
 
-    /// Keypoints/features tracked in previous frame
-    KeyPoints previous_key_points_;
+    /// Keypoints/features tracked
+    KeyPoints key_points_;
+
+    /// Keypoints/features tracked
+    std::vector<Point2f> tracked_features_;
+
+    /// 3-D coordinates of tracked features
+    std::vector<Point3d> tracked_feature_coords_;
+
+    /// Relative motion between previous two frames
+    Sophus::SE3d relative_motion_;
 
     /// Feature detector
     ///
@@ -175,6 +234,9 @@ private:
     /// Shi, Jianbo, and Tomasi. 1994. “Good Features to Track.” In 1994 Proceedings of IEEE Conference on Computer 
     /// Vision and Pattern Recognition, 593–600.
     cv::Ptr<cv::GFTTDetector> feature_detector_;
+
+    /// Random number generator to use
+    std::default_random_engine random_engine;
 };
 
 } // namespace slammer

@@ -2,6 +2,7 @@ add_library(slammer_lib
   src/slammer.cpp src/events.cpp src/camera.cpp
   src/backend.cpp src/frontend.cpp src/map.cpp 
   src/imu.cpp src/landmark.cpp
+  src/math.cpp
   src/loris/arrow_utils.cpp src/loris/driver.cpp src/loris/opencv_utils.cpp src/loris/schema.cpp
 )
 
@@ -14,6 +15,7 @@ add_executable(test_slammer_lib
   tests/slammer_test.cpp tests/events_test.cpp
   tests/backend_test.cpp tests/frontend_test.cpp tests/map_test.cpp
   tests/imu_test.cpp tests/landmark_test.cpp
+  tests/math_test.cpp
   tests/loris/arrow_utils_test.cpp tests/loris/driver_test.cpp tests/loris/opencv_utils_test.cpp
 )
 
