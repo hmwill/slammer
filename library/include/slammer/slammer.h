@@ -34,11 +34,15 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <chrono>
 #include <exception>
-#include <string>
-#include <variant>
 #include <future>
+#include <map>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <variant>
 
 #include "opencv2/opencv.hpp"
 #include "sophus/se3.hpp"

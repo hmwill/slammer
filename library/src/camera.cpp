@@ -45,17 +45,7 @@ Point2f Camera::RobotToPixel(const Point3d& coord) const {
     return CameraToPixel(robot_to_camera_ * coord);
 }
 
-Point2f Camera::CameraToPixel(const Point3d& coord) const {
-    return Point2f(coord(0) / coord(2) * fx_ + cx_,
-                   coord(1) / coord(2) * fy_ + cy_);
-}
-
 Point3d Camera::PixelToRobot(const Point2f& coord, double depth) const {
     return camera_to_robot_ * PixelToCamera(coord, depth);
 }
 
-Point3d Camera::PixelToCamera(const Point2f& coord, double depth) const {
-    return Point3d((coord.x - cx_) * depth / fx_,
-                   (coord.y - cy_) * depth / fy_,
-                   depth);
-}

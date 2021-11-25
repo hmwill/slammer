@@ -37,9 +37,69 @@
 
 namespace slammer {
 
-/// Keyframes are 
-struct Keyframe {
+// from camera.h
+class Camera;
 
+// from frontend.h
+struct RgbdFrameEvent;
+
+// in this file
+struct Feature;
+struct Landmark;
+struct Keyframe;
+
+using KeyframePointer = std::shared_ptr<Keyframe>;
+using LandmarkPointer = std::shared_ptr<Landmark>;
+using FeaturePointer = std::shared_ptr<Feature>;
+
+/// Keyframes are 
+struct Keyframe: std::enable_shared_from_this<Keyframe> {
+    // the timestamp serves as identifer (for a given camera, that is)
+    Timestamp timestamp;
+
+    // Estimated pose of the camera
+    SE3d pose;
+
+    // tracked features within the keyframe
+    std::vector<FeaturePointer> features;
+
+    // feature descriptions; index aligns with `features` member variable
+    cv::Mat descriptions;
+
+    // TODO: Attached image/point cloud?
+};
+
+struct Feature: std::enable_shared_from_this<Feature> {
+    // keypoint specification
+    cv::KeyPoint keypoint;
+
+    // depth value as measured via depth sensor
+    float depth;
+
+    // the keyframe where this observation had been seen
+    std::weak_ptr<Keyframe> keyframe;
+
+    // global landmark this feature has been mapped to
+    std::weak_ptr<Landmark> landmark;
+};
+
+using LandmarkId = std::uint64_t;
+
+struct Landmark: std::enable_shared_from_this<Landmark> {
+    // Unique identifier for the landmark
+    LandmarkId id;
+
+    // estimated location
+    Point3d location;
+
+    // uncertainty around location; orthogonal vectors describing Gaussian
+    Matrix3d variances;
+
+    // front-facing normal; estimated from observations
+    Vector3d normal;
+
+    // references to the observations within individual key frames
+    std::vector<std::weak_ptr<Feature>> observations;
 };
 
 /// \brief This class provides an environment map for Slammer
@@ -59,8 +119,42 @@ public:
     Map(const Map&) = delete;
     Map& operator=(const Map&) = delete;
 
-private:
+    /// Create a new keyframe entry based on the event data provided by the frontend
+    KeyframePointer CreateKeyframe(const RgbdFrameEvent& event);
 
+    /// Locate a keyframe based on a timestamp
+    KeyframePointer GetKeyframe(Timestamp timestamp) const;
+
+    /// Locate the most recently added keyframe
+    KeyframePointer GetMostRecentKeyframe() const;
+
+    /// Create landmarks for all unmapped featuress in a keyframe
+    void CreateLandmarksForUnmappedFeatures(const Camera& camera, const KeyframePointer& keyframe);
+
+    /// Create a new landmark and register it with the map; the landmark will also
+    /// be associated with the initial, defining feature
+    LandmarkId CreateLandmark(const Camera& camera, const FeaturePointer& feature);
+
+    /// Merge two landmarks into a single one
+    void MergeLandmarks(LandmarkId primary, LandmarkId secondary);
+
+    /// Access a given landmark by id
+    LandmarkPointer GetLandmark(LandmarkId id) const;
+
+    /// Is the map empty?
+    bool has_keyframes() const { return !keyframes_.empty(); }
+
+private:
+    // Identifier to use for the next landmark to create
+    LandmarkId next_landmark_id_;
+
+    // We maintain key frames as a collected ordered by timestamp, which allows us
+    // to reconstruct temporal adjacencies between key frames.
+    std::map<Timestamp, std::shared_ptr<Keyframe>> keyframes_;
+
+    // We maintain landmarks as unordered collection. In the future, organizing 
+    // landmarks using a spatial data structure may be a better choice. 
+    std::unordered_map<LandmarkId, std::shared_ptr<Landmark>> landmarks_;
 };
 
 } // namespace slammer

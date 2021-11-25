@@ -38,9 +38,21 @@
 
 namespace slammer {
 
+class Map;
+
 /// \brief This class provides the backend process for Slammer
 class Backend {
 public:
+    /// Configuration parameters for the backend process 
+    struct Parameters {
+        // maximum (Hamming) difference between features to be considered a match
+        float max_match_distance = 12.0f;
+
+        // minimum number of matches against previous frame to work locally
+        int min_feature_matches = 50;
+    };
+
+    Backend(const Parameters& parameters, Map& map);
 
     // Disallow copy construction and copy assignment
     Backend(const Backend&) = delete;
@@ -50,6 +62,17 @@ public:
     void HandleRgbdFrameEvent(const RgbdFrameEvent& frame);
 
 private:
+    std::vector<cv::DMatch> MatchFeatures(const cv::Mat& descriptions1, const cv::Mat& descriptions2);
+
+private:
+    /// Configuration parameters
+    Parameters parameters_;
+
+    /// The sparse map we are populating
+    Map& map_;
+
+    /// Feature matcher
+    cv::BFMatcher matcher_;
 };
 
 } // namespace slammer

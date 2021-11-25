@@ -67,6 +67,9 @@ struct RgbdFrameEvent: public Event {
     // Locations of feature points within the image (relative to left RGB)
     std::vector<cv::KeyPoint> keypoints;
 
+    // Feature descriptions
+    cv::Mat descriptions;
+
     // Frame data
     RgbdFrameData frame_data;
 
@@ -187,6 +190,7 @@ private:
     // Trigger a key frame event using the current frame and tracking information
     void PostKeyframe();
 
+    // Various configuration prameters
     Parameters parameters_;
 
     /// Parameters describing the RGB camera
@@ -201,6 +205,9 @@ private:
     /// Current processing status
     Status status_;
 
+    /// Timepoint last processed frame
+    Timestamp last_processed_time_;
+
     /// Pose associated with the previous frame
     Sophus::SE3d current_pose_;
 
@@ -209,6 +216,9 @@ private:
 
     /// Pose associated with the previous frame
     Sophus::SE3d previous_pose_;
+
+    /// Timestamp of last keyframe
+    Timestamp last_keyframe_timestamp_;
 
     /// Pose associated with the most recent key frame
     Sophus::SE3d last_keyframe_pose_;
@@ -228,12 +238,11 @@ private:
     /// Relative motion between previous two frames
     Sophus::SE3d relative_motion_;
 
+    /// Tangent representation (log) of relative_motion_
+    Sophus::SE3d::Tangent relative_motion_twist_;
+    
     /// Feature detector
-    ///
-    /// This is the OpenCV implementation of
-    /// Shi, Jianbo, and Tomasi. 1994. “Good Features to Track.” In 1994 Proceedings of IEEE Conference on Computer 
-    /// Vision and Pattern Recognition, 593–600.
-    cv::Ptr<cv::GFTTDetector> feature_detector_;
+    cv::Ptr<cv::FeatureDetector> feature_detector_;
 
     /// Random number generator to use
     std::default_random_engine random_engine;

@@ -80,7 +80,8 @@ RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camer
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera), 
       status_(Status::kInitializing), random_engine(parameters.seed) {
     feature_detector_ = 
-        cv::GFTTDetector::create(parameters.num_features, parameters.quality_level, parameters.min_distance);
+        //cv::GFTTDetector::create(parameters.num_features, parameters.quality_level, parameters.min_distance);
+        cv::ORB::create(parameters_.num_features);
 }
 
 void RgbdFrontend::ClearFeatureVectors() {
@@ -93,12 +94,15 @@ void RgbdFrontend::PostKeyframe() {
     
     RgbdFrameEvent event;
 
-    event.timestamp = std::max(current_frame_data_.time_rgb, current_frame_data_.time_depth);
+    last_keyframe_timestamp_ =
+        event.timestamp = std::max(current_frame_data_.time_rgb, current_frame_data_.time_depth);
     event.frame_data = current_frame_data_;
     event.pose = current_pose_;
     event.keypoints = key_points_;
     event.info.rgb = &rgb_camera_;
     event.info.depth = &depth_camera_;
+
+    feature_detector_->compute(current_frame_data_.rgb, event.keypoints, event.descriptions);
 
     keyframes.HandleEvent(event);
 }
@@ -126,10 +130,11 @@ void RgbdFrontend::ProcessFrame() {
     if (current_frame_data_.rgb.empty() || current_frame_data_.depth.empty())
         return;
 
+    Timestamp now = std::max(current_frame_data_.time_depth, current_frame_data_.time_rgb);
+
     // estimate the current pose 
-    // TODO: properly represent and handle time intervals between frames; this here assumes
-    // a constant, steady frame rate
-    current_pose_ = relative_motion_ * previous_pose_;
+    auto relative_motion = SE3d::exp(relative_motion_twist_ * (last_processed_time_ - now).count());
+    current_pose_ = relative_motion * previous_pose_;
 
     switch (status_) {
     case Status::kInitializing:
@@ -193,12 +198,15 @@ void RgbdFrontend::ProcessFrame() {
                 DetectAdditionalFeatures();
             }
         }
+
         break;
     }
 
     previous_frame_data_ = current_frame_data_;
     relative_motion_ = current_pose_ * previous_pose_.inverse();
+    relative_motion_twist_ = relative_motion_.log() * (1.0/(last_processed_time_ - now).count());
     previous_pose_ = current_pose_;
+    last_processed_time_ = now;
 }
 
 size_t RgbdFrontend::DetectKeyframeFeatures() {

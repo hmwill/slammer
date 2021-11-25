@@ -60,11 +60,11 @@ public:
            float fx, float fy, float cx, float cy,
            SE3d camera_to_robot);
 
-    Point2f RobotToPixel(const Point3d& coord) const;
-    Point2f CameraToPixel(const Point3d& coord) const;
+    inline Point3d PixelToCamera(const Point2f& coord, double depth = 1.0) const;
+    inline Point2f CameraToPixel(const Point3d& coord) const;
 
+    Point2f RobotToPixel(const Point3d& coord) const;
     Point3d PixelToRobot(const Point2f& coord, double depth = 1.0) const;
-    Point3d PixelToCamera(const Point2f& coord, double depth = 1.0) const;
 
     SE3d camera_to_robot() const { return camera_to_robot_; }
 
@@ -84,6 +84,18 @@ private:
     /// camera image dimension
     float width_, height_;
 };
+
+Point2f Camera::CameraToPixel(const Point3d& coord) const {
+    return Point2f(coord(0) / coord(2) * fx_ + cx_,
+                   coord(1) / coord(2) * fy_ + cy_);
+}
+
+Point3d Camera::PixelToCamera(const Point2f& coord, double depth) const {
+    return Point3d((coord.x - cx_) * depth / fx_,
+                   (coord.y - cy_) * depth / fy_,
+                   depth);
+}
+
 
 } // namespace slammer
 
