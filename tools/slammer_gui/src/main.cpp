@@ -170,7 +170,7 @@ int main(int argc, char *argv) {
     ptr_features->detectAndCompute(image1, cv::noArray(), keypoints1, descriptors1);
     ptr_features->detectAndCompute(image2, cv::noArray(), keypoints2, descriptors2);
 
-    cv::BFMatcher matcher(cv::NORM_L2, true);
+    cv::BFMatcher matcher(cv::NORM_HAMMING, true);
     std::vector<cv::DMatch> matches;
     matcher.match(descriptors1, descriptors2, matches);
 
