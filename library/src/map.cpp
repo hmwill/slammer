@@ -39,6 +39,7 @@ KeyframePointer Map::CreateKeyframe(const RgbdFrameEvent& event) {
 
     result->timestamp = event.timestamp;
     result->pose = event.pose;
+    result->pinned = false;
     
     for (const auto& keypoint: event.keypoints) {
         auto feature = std::make_shared<Feature>();

@@ -66,6 +66,9 @@ struct Keyframe: std::enable_shared_from_this<Keyframe> {
     // feature descriptions; index aligns with `features` member variable
     cv::Mat descriptions;
 
+    // Keyframe pose is pinned in space; to be excluded from optimization
+    bool pinned;
+
     // TODO: Attached image/point cloud?
 };
 
