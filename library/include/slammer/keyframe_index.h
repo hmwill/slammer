@@ -74,6 +74,8 @@ private:
     Bitset descriptor_;
 };
 
+class ImageDescriptor;
+
 /// Representation of the abstract "words" used to describe images.
 ///
 /// The vocabulary maps the overall set of possible features to a predetermined
@@ -97,6 +99,11 @@ public:
     /// This mostly affects the word frequency calculation (relative to feature count vs. relative to frame count)
     void ComputeVocabulary(const FeatureDescriptors& descriptors);
 
+    /// Encode a set of feature descriptors using the vocabulary as imaeg descriptor
+    ///
+    /// \param descriptors the feature descriptors to encode via the vocabulary
+    ImageDescriptor Encode(const FeatureDescriptors& descriptors) const;
+
     /// Boost serialization support
     template<class Archive>
     void serialize(Archive & ar, const unsigned int /* file_version */);
@@ -104,8 +111,6 @@ public:
 private:
     struct Node;
     using NodePointer = std::unique_ptr<Node>;
-
-    NodePointer ComputeSubtree(size_t level, const FeatureDescriptors& descriptors);
 
     /// Each node has this number of children
     static const size_t kArity = 10;
@@ -145,6 +150,12 @@ private:
         std::variant<Leaf, Children> node_type;
     };
 
+    NodePointer ComputeSubtree(size_t level, const FeatureDescriptors& descriptors);
+
+    static size_t FindClosest(const Children& subtrees, const FeatureDescriptor& descriptor);
+
+    const Leaf& FindLeaf(const FeatureDescriptor& descriptor) const;
+
     // root of the vocabulary tree
     NodePointer root_; 
 
@@ -161,9 +172,12 @@ class ImageDescriptor {
 public:
     using WordCount = uint32_t;
 
+    friend class Vocabulary;
+
 private:
     std::map<Vocabulary::Word, WordCount> descriptor_;
 };
+
 
 /// Feature-based index of keyframes which can retrieve keyfranes based on image 
 /// similarity.

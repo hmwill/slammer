@@ -160,19 +160,7 @@ Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDe
         }
 
         for (size_t index = 0; index < descriptors.size(); ++index) {
-            size_t min_distance_index = 0;
-            FeatureDescriptor::Distance min_distance = 
-                FeatureDescriptor::ComputeDistance(children[0].centroid, *descriptors[index]);
-
-            for (size_t center_index = 1; center_index < kArity; ++center_index) {
-                FeatureDescriptor::Distance distance = 
-                    FeatureDescriptor::ComputeDistance(children[center_index].centroid, *descriptors[index]);
-
-                if (distance < min_distance) {
-                    min_distance = distance;
-                    min_distance_index = center_index;
-                }
-            }
+            size_t min_distance_index = FindClosest(children, *descriptors[index]);
 
             if (assigned_cluster[index] != min_distance_index) {
                 assigned_cluster[index] = min_distance_index;
@@ -187,6 +175,48 @@ Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDe
     }
 
     return std::make_unique<Node>(std::move(children));
+}
+
+size_t Vocabulary::FindClosest(const Children& subtrees, const FeatureDescriptor& descriptor) {
+    size_t min_distance_index = 0;
+    FeatureDescriptor::Distance min_distance = 
+        FeatureDescriptor::ComputeDistance(subtrees[0].centroid, descriptor);
+
+    for (size_t center_index = 1; center_index < kArity; ++center_index) {
+        FeatureDescriptor::Distance distance = 
+            FeatureDescriptor::ComputeDistance(subtrees[center_index].centroid, descriptor);
+
+        if (distance < min_distance) {
+            min_distance = distance;
+            min_distance_index = center_index;
+        }
+    }
+
+    return min_distance_index;
+}
+
+ImageDescriptor Vocabulary::Encode(const FeatureDescriptors& descriptors) const {
+    ImageDescriptor result;
+
+    for (auto descriptor: descriptors) {
+        auto leaf = FindLeaf(*descriptor);
+        result.descriptor_.try_emplace(leaf.word, 0);
+        result.descriptor_[leaf.word] += 1;
+    }
+
+    return std::move(result);
+}
+
+const Vocabulary::Leaf& Vocabulary::FindLeaf(const FeatureDescriptor& descriptor) const {
+    const Node* node = root_.get();
+
+    while (std::holds_alternative<Children>(node->node_type)) {
+        const auto& children = std::get<Children>(node->node_type);
+        auto child_index = FindClosest(children, descriptor);
+        node = children[child_index].subtree.get();
+    }
+
+    return std::get<Leaf>(node->node_type);
 }
 
 //
