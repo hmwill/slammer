@@ -3,6 +3,7 @@ add_library(slammer_lib
   src/backend.cpp src/frontend.cpp src/map.cpp 
   src/imu.cpp 
   src/math.cpp
+  src/keyframe_index.cpp
   src/loris/arrow_utils.cpp src/loris/driver.cpp src/loris/opencv_utils.cpp src/loris/schema.cpp
 )
 
@@ -16,6 +17,7 @@ add_executable(test_slammer_lib
   tests/backend_test.cpp tests/frontend_test.cpp tests/map_test.cpp
   tests/imu_test.cpp 
   tests/math_test.cpp
+  tests/keyframe_index_test.cpp
   tests/loris/arrow_utils_test.cpp tests/loris/driver_test.cpp tests/loris/opencv_utils_test.cpp
 )
 

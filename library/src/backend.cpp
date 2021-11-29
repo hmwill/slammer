@@ -224,14 +224,21 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
         optimizer.addVertex(vertex);
     }
 
-    // TODO: Add relevant edges for keyframes not included in the subgraph
-    assert(false);
     for (size_t keyframe_index = 0; keyframe_index < keyframes.size(); ++keyframe_index) {
         const auto& keyframe = keyframes[keyframe_index];
 
         for (const auto& feature: keyframe->features) {
             if (auto landmark = feature->landmark.lock()) {
-                auto landmark_index = landmark_indices[landmark->id];
+                auto landmark_iter = landmark_indices.find(landmark->id);
+
+                // Skip landmarks that don't contribute to the sub graph at hand
+                if (landmark_iter == landmark_indices.end()) {
+                    // should only happen for keyframes that anchor the optimization problem
+                    assert(keyframe->pinned);
+                    continue;
+                }
+
+                auto landmark_index = landmark_iter->second;
 
                 auto edge = new g2o::EdgeSE3PointXYZDepth();
                 edge->setVertex( 0, optimizer.vertex(keyframe_index));
@@ -245,8 +252,8 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
 
                 // What is this?
                 edge->setParameterId(0, 0);
-                edge->setRobustKernel( new g2o::RobustKernelHuber() );
-                optimizer.addEdge( edge );
+                edge->setRobustKernel(new g2o::RobustKernelHuber());
+                optimizer.addEdge(edge);
             }
         }
     }
@@ -254,7 +261,7 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
     // Perform the actual optimization
     optimizer.setVerbose(true); // while debugging
     optimizer.initializeOptimization();
-    optimizer.optimize(10);
+    optimizer.optimize(parameters_.local_optimization_iterations);
 
     // retrieve results
     poses.clear();
@@ -273,6 +280,14 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
     for (size_t index = 0; index < landmarks.size(); ++index) {
         auto vertex = dynamic_cast<g2o::VertexPointXYZ *>(optimizer.vertex(index + landmark_vertex_offset));
         locations.push_back(vertex->estimate());
+
+        // TODO: What criteria should we apply to mark bad features? 
+        double error = 0.0;
+        for (auto edge: vertex->edges()) {
+            auto se3_point_xyz_depth = dynamic_cast<g2o::EdgeSE3PointXYZDepth*>(edge);
+            se3_point_xyz_depth->computeError();
+            auto chi2 = se3_point_xyz_depth->chi2();
+        }
     }
 }
 
@@ -281,10 +296,29 @@ void Backend::UpdatePosesAndLocations(const Keyframes& keyframes, const Landmark
     assert(keyframes.size() == poses.size());
     assert(landmarks.size() == locations.size());
 
+    // TODO: Check for concurrency issues once we go multi-threaded
+    for (size_t index = 0; index < keyframes.size(); ++index) {
+        auto& keyframe = keyframes[index];
 
+        if (!keyframe->pinned) {
+            keyframe->pose = poses[index];
+        }
+    }
 
-    // TODO
-    // How to update poses and landmarks after the optimization has completed?
+    for (size_t index = 0; index < landmarks.size(); ++index) {
+        auto& landmark = landmarks[index];
+        landmark->location = locations[index];
 
-    assert(false);
+        // Update normal
+        Vector3d normal_sum;
+        for (const auto& observation: landmark->observations) {
+            if (auto feature = observation.lock()) {
+                if (auto keyframe = feature->keyframe.lock()) {
+                    normal_sum -= (keyframe->pose * landmark->location).normalized();
+                }
+            }
+        }
+
+        landmark->normal = normal_sum.normalized();
+    }
 }

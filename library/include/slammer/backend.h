@@ -57,6 +57,9 @@ public:
 
         // upper limit on the number of keyframes included in local optimization
         int max_keyframes_in_local_graph = 15;
+
+        // number of solver iterations for local optimization
+        int local_optimization_iterations = 10;
     };
 
     Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map);

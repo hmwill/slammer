@@ -35,8 +35,6 @@
 
 #include "slammer/slammer.h"
 
-#include <random>
-
 #include "opencv2/features2d.hpp"
 
 #include "slammer/camera.h"
@@ -245,7 +243,7 @@ private:
     cv::Ptr<cv::FeatureDetector> feature_detector_;
 
     /// Random number generator to use
-    std::default_random_engine random_engine;
+    std::default_random_engine random_engine_;
 };
 
 } // namespace slammer

@@ -34,6 +34,8 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <chrono>
@@ -41,9 +43,15 @@
 #include <future>
 #include <map>
 #include <memory>
+#include <numeric>
+#include <random>
 #include <string>
 #include <unordered_map>
 #include <variant>
+
+#include "boost/dynamic_bitset.hpp"
+#include "boost/archive/text_iarchive.hpp"
+#include "boost/archive/text_oarchive.hpp"
 
 #include "opencv2/opencv.hpp"
 #include "sophus/se3.hpp"

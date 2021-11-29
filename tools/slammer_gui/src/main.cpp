@@ -166,9 +166,15 @@ int main(int argc, char *argv) {
     std::vector<cv::KeyPoint> keypoints2;
     cv::Mat descriptors1, descriptors2;
 
-    cv::Ptr<cv::Feature2D> ptr_features = cv::AKAZE::create();
+    cv::Ptr<cv::Feature2D> ptr_features = cv::ORB::create();
     ptr_features->detectAndCompute(image1, cv::noArray(), keypoints1, descriptors1);
     ptr_features->detectAndCompute(image2, cv::noArray(), keypoints2, descriptors2);
+
+	std::cout << "Num rows: " << descriptors1.rows << std::endl;
+	std::cout << "Num cols: " << descriptors1.cols << std::endl;
+	std::cout << "Type: " << descriptors1.type() << std::endl;
+
+	//std::cout << "Descriptor1:" << std::endl << descriptors1 << std::endl;
 
     cv::BFMatcher matcher(cv::NORM_HAMMING, true);
     std::vector<cv::DMatch> matches;

@@ -78,7 +78,7 @@ size_t CompressInto(const Data& input, const Mask& mask, Data& output) {
 
 RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera), 
-      status_(Status::kInitializing), random_engine(parameters.seed) {
+      status_(Status::kInitializing), random_engine_(parameters.seed) {
     feature_detector_ = 
         //cv::GFTTDetector::create(parameters.num_features, parameters.quality_level, parameters.min_distance);
         cv::ORB::create(parameters_.num_features);
@@ -176,7 +176,7 @@ void RgbdFrontend::ProcessFrame() {
 
             num_features = 
                 RobustIcp(tracked_feature_coords_, current_coords,
-                          random_engine, relative_motion, mask,
+                          random_engine_, relative_motion, mask,
                           parameters_.max_iterations, parameters_.sample_size, 
                           parameters_.outlier_factor);
 
