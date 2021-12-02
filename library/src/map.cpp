@@ -31,6 +31,7 @@
 #include "slammer/map.h"
 
 #include "slammer/frontend.h"
+#include "slammer/keyframe_index.h"
 
 using namespace slammer;
 

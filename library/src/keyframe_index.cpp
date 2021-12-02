@@ -41,8 +41,15 @@ FeatureDescriptor FeatureDescriptor::ComputeCentroid(const std::vector<const Fea
     counters.fill(0);
 
     for (auto descriptor: descriptors) {
-        for (size_t index = 0; index < kNumBits; ++index) {
-            counters[index] += descriptor->descriptor_[index];
+        for (size_t index = 0; index < kNumBits; index += 8) {
+            counters[index + 0] += descriptor->descriptor_[index + 0];
+            counters[index + 1] += descriptor->descriptor_[index + 1];
+            counters[index + 2] += descriptor->descriptor_[index + 2];
+            counters[index + 3] += descriptor->descriptor_[index + 3];
+            counters[index + 4] += descriptor->descriptor_[index + 4];
+            counters[index + 5] += descriptor->descriptor_[index + 5];
+            counters[index + 6] += descriptor->descriptor_[index + 6];
+            counters[index + 7] += descriptor->descriptor_[index + 7];
         }
     }
 
@@ -77,21 +84,31 @@ FeatureDescriptor::FeatureDescriptor(const uchar* bits) {
 //
 
 Vocabulary::Vocabulary(): word_count_(0), random_engine_(kSeed) {}
+
+Vocabulary::Vocabulary(Vocabulary&& other) {
+    std::swap(root_, other.root_);
+    std::swap(word_count_, other.word_count_);
+    std::swap(word_counts_, other.word_counts_);
+    std::swap(word_weights_, other.word_weights_);
+    std::swap(random_engine_, other.random_engine_);
+}
+
 Vocabulary::~Vocabulary() {}
 
 void Vocabulary::ComputeVocabulary(const FeatureDescriptors& descriptors) {
     // Recursively partition the descriptors into sub-trees for each of the clusters
     root_ = ComputeSubtree(0, descriptors);
+
+    // calculate scores
+    for (auto count: word_counts_) {
+        word_weights_.push_back(std::log(static_cast<double>(word_count_) / static_cast<double>(count)));
+    }
 }
 
 Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDescriptors& descriptors) {
     if (level == kLevels || descriptors.size() < kArity) {
-        Leaf leaf { 
-            word_count_++, 
-            static_cast<unsigned>(descriptors.size()) 
-        };
-
-        return std::make_unique<Node>(std::move(leaf));
+        word_counts_.push_back(descriptors.size());
+        return std::make_unique<Node>(word_count_++);
     } 
 
     std::vector<FeatureDescriptor::Distance> min_distances;
@@ -195,19 +212,27 @@ size_t Vocabulary::FindClosest(const Children& subtrees, const FeatureDescriptor
     return min_distance_index;
 }
 
-ImageDescriptor Vocabulary::Encode(const FeatureDescriptors& descriptors) const {
-    ImageDescriptor result;
+std::unique_ptr<ImageDescriptor> Vocabulary::Encode(const FeatureDescriptor::Set& descriptors) const {
+    auto result = std::make_unique<ImageDescriptor>();
 
-    for (auto descriptor: descriptors) {
-        auto leaf = FindLeaf(*descriptor);
-        result.descriptor_.try_emplace(leaf.word, 0);
-        result.descriptor_[leaf.word] += 1;
+    for (const auto& descriptor: descriptors) {
+        auto word = FindWord(descriptor);
+        result->descriptor_.try_emplace(word, 0);
+        result->descriptor_[word] += word_weights_[word];
+    }
+
+    // normalize the scores
+    double factor = 1.0 / std::accumulate(result->descriptor_.begin(), result->descriptor_.end(), 0.0, 
+        [](double sum, const auto& item){return sum + item.second;});
+
+    for (auto& item: result->descriptor_) {
+        item.second *= factor;
     }
 
     return std::move(result);
 }
 
-const Vocabulary::Leaf& Vocabulary::FindLeaf(const FeatureDescriptor& descriptor) const {
+const Vocabulary::Word Vocabulary::FindWord(const FeatureDescriptor& descriptor) const {
     const Node* node = root_.get();
 
     while (std::holds_alternative<Children>(node->node_type)) {
@@ -216,13 +241,120 @@ const Vocabulary::Leaf& Vocabulary::FindLeaf(const FeatureDescriptor& descriptor
         node = children[child_index].subtree.get();
     }
 
-    return std::get<Leaf>(node->node_type);
+    return std::get<Word>(node->node_type);
+}
+
+//
+// ImageDescriptor
+//
+
+ImageDescriptor::Score ImageDescriptor::Similarity(const ImageDescriptor& first, const ImageDescriptor& second) {
+    auto iter_first = first.descriptor_.begin(), end_first = first.descriptor_.end();
+    auto iter_second = second.descriptor_.begin(), end_second = second.descriptor_.end();
+
+    Score score = 0.0;
+
+    while (iter_first != end_first && iter_second != end_second) {
+        if (iter_first->first == iter_second->first) {
+            score += iter_first->second + iter_second->second - std::fabs(iter_first->second - iter_second->second);
+            ++iter_first;
+            ++iter_second;
+        } else if (iter_first->first < iter_second->first) {
+            iter_first = first.descriptor_.lower_bound(iter_second->first);
+        } else {
+            iter_second = second.descriptor_.lower_bound(iter_first->first);
+        }
+    }
+
+    return score * 0.5;
 }
 
 //
 // KeyframeIndex
 //
 
-KeyframeIndex::KeyframeIndex() {}
+KeyframeIndex::KeyframeIndex(Vocabulary&& vocabulary)
+    : vocabulary_(std::move(vocabulary)), next_row_(0) {
+}
+
 KeyframeIndex::~KeyframeIndex() {}
 
+void KeyframeIndex::Insert(const KeyframePointer& keyframe) {
+    if (!keyframe->descriptor_) {
+        keyframe->descriptor_ = vocabulary_.Encode(FeatureDescriptor::From(keyframe->descriptions));
+    }
+
+    assert(reverse_index_.find(keyframe) == reverse_index_.end());
+
+    RowIndex row_index;
+    if (free_list_.empty()) {
+        row_index = next_row_++;
+    } else {
+        row_index = free_list_.back();
+        free_list_.pop_back();
+    }
+
+    reverse_index_[keyframe] = row_index;
+    rows_[row_index] = Row { keyframe };
+
+    for (const auto& item: keyframe->descriptor_->descriptor_) {
+        columns_[item.first].insert(row_index);
+    }
+}
+
+void KeyframeIndex::Delete(const KeyframePointer& keyframe) {
+    assert(keyframe->descriptor_);
+    
+    auto reverse_row_iter = reverse_index_.find(keyframe);
+    assert(reverse_row_iter != reverse_index_.end());
+    auto row_index = reverse_row_iter->second;
+    reverse_index_.erase(reverse_row_iter);
+
+    rows_.erase(row_index);
+
+    for (const auto& item: keyframe->descriptor_->descriptor_) {
+        columns_[item.first].erase(row_index);
+    }
+
+    free_list_.push_back(row_index);
+}
+
+void KeyframeIndex::Search(const KeyframePointer& query, std::vector<Result>& results,
+                           size_t max_results) const {
+    if (!query->descriptor_) {
+        query->descriptor_ = vocabulary_.Encode(FeatureDescriptor::From(query->descriptions));
+    }
+
+    absl::btree_map<RowIndex, unsigned> word_counts;
+
+    for (const auto& item: query->descriptor_->descriptor_) {
+        Vocabulary::Word word = item.first;
+        const auto& column = columns_[word];
+
+        for (auto row_index: column) {
+            word_counts[row_index] += word;
+        }
+    }
+    
+    unsigned max_word_count = std::accumulate(word_counts.begin(), word_counts.end(), 0u,
+                                              [](unsigned max, const auto& item) { return std::max(max, item.second); });
+    unsigned min_word_count = static_cast<unsigned>(0.8 * max_word_count);
+
+    for (const auto& item: word_counts) {
+        if (item.second < min_word_count) {
+            continue;
+        }
+
+        RowIndex row_index = item.first;
+        const KeyframePointer& candidate = rows_.find(row_index)->second.keyframe;
+        ImageDescriptor::Score score = ImageDescriptor::Similarity(*query->descriptor_, *candidate->descriptor_);
+
+        results.emplace_back(Result(candidate, score));
+        std::push_heap(results.begin(), results.end(), 
+                       [](const auto& first, const auto& second){ return first.score < second.score; });
+    }
+
+    if (results.size() > max_results) {
+        results.erase(results.begin() + max_results, results.end());
+    }
+}

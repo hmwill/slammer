@@ -25,6 +25,7 @@ add_dependencies(test_slammer_lib slammer_lib)
 
 target_link_libraries(test_slammer_lib 
   slammer_lib arrow_shared ${OpenCV_LIBS} GTest::gtest GTest::gtest_main
+  ${Boost_LIBRARIES}
 )
 
 add_test(NAME SlammerLibTests COMMAND test_slammer_lib WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -10,6 +10,12 @@ enable_testing()
 find_package(GTest REQUIRED)
 include(Dart)
 
+find_package(absl CONFIG REQUIRED)
+include_directories(${absl_INCLUDE_DIRS})
+
+find_package(Boost REQUIRED)
+include_directories(${Boost_INCLUDE_DIRS})
+
 find_package(Arrow 5.0 REQUIRED)
 include_directories(${Arrow_INCLUDE_DIRS})
 

@@ -35,3 +35,10 @@
 #include "slammer/keyframe_index.h"
 
 using namespace slammer;
+
+
+TEST(Vocabulary, Serialization) {
+    Vocabulary vocabulary;
+
+
+}

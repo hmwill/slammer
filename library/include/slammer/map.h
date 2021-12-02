@@ -35,6 +35,8 @@
 
 #include "slammer/slammer.h"
 
+#include "absl/container/btree_map.h"
+
 namespace slammer {
 
 // from camera.h
@@ -52,6 +54,8 @@ using KeyframePointer = std::shared_ptr<Keyframe>;
 using LandmarkPointer = std::shared_ptr<Landmark>;
 using FeaturePointer = std::shared_ptr<Feature>;
 
+class ImageDescriptor;
+
 /// Keyframes are 
 struct Keyframe: std::enable_shared_from_this<Keyframe> {
     // the timestamp serves as identifer (for a given camera, that is)
@@ -68,6 +72,9 @@ struct Keyframe: std::enable_shared_from_this<Keyframe> {
 
     // Keyframe pose is pinned in space; to be excluded from optimization
     bool pinned;
+
+    // Image descriptor; will be filled in by KeyframeIndex
+    std::unique_ptr<ImageDescriptor> descriptor_;
 
     // TODO: Attached image/point cloud?
 };
@@ -153,7 +160,7 @@ private:
 
     // We maintain key frames as a collected ordered by timestamp, which allows us
     // to reconstruct temporal adjacencies between key frames.
-    std::map<Timestamp, std::shared_ptr<Keyframe>> keyframes_;
+    absl::btree_map<Timestamp, std::shared_ptr<Keyframe>> keyframes_;
 
     // We maintain landmarks as unordered collection. In the future, organizing 
     // landmarks using a spatial data structure may be a better choice. 

@@ -35,6 +35,9 @@
 
 #include "slammer/slammer.h"
 
+#include "absl/container/btree_set.h"
+#include "absl/container/btree_map.h"
+
 #include "slammer/map.h"
 
 namespace slammer {
@@ -48,6 +51,7 @@ public:
     static const size_t kNumBits = 256;
 
     using Distance = size_t;
+    using Set = std::vector<FeatureDescriptor>;
 
     // We are using a dynamic bitset from the boost library until we have descriptor extraction
     // converted from not using OpenCV Mat types anymore.
@@ -60,6 +64,25 @@ public:
     static FeatureDescriptor From(const cv::Mat& mat, int row)  {
         return FeatureDescriptor(mat.ptr(row));
     }   
+
+    /// Ceate a feature descriptor based on the contents of all the rows in the given OpenCV matrix.
+    /// The Matrix is expected to have elements of type CV_8UC1 and to have 32 columns.
+    static Set From(const cv::Mat& mat) {
+        Set result;
+
+        for (int index = 0; index < mat.rows; ++index) {
+            result.emplace_back(From(mat, index));
+        }
+
+        return result;
+    }
+
+    static void IntoPointerVector(const Set& descriptors,
+                                  std::vector<const FeatureDescriptor*>& result) {
+        for (const auto& descriptor: descriptors) {
+            result.push_back(&descriptor);
+        }
+    }
 
     /// Calculate the centroid of a collection of descriptors
     static FeatureDescriptor ComputeCentroid(const std::vector<const FeatureDescriptor*> descriptors);
@@ -91,6 +114,8 @@ public:
     using FeatureDescriptors = std::vector<const FeatureDescriptor*>;
 
     Vocabulary();
+    Vocabulary(Vocabulary&& other);
+
     ~Vocabulary();
 
     /// Create a vocabulary based on a collection of feature descriptors
@@ -102,11 +127,7 @@ public:
     /// Encode a set of feature descriptors using the vocabulary as imaeg descriptor
     ///
     /// \param descriptors the feature descriptors to encode via the vocabulary
-    ImageDescriptor Encode(const FeatureDescriptors& descriptors) const;
-
-    /// Boost serialization support
-    template<class Archive>
-    void serialize(Archive & ar, const unsigned int /* file_version */);
+    std::unique_ptr<ImageDescriptor> Encode(const FeatureDescriptor::Set& descriptors) const;
 
 private:
     struct Node;
@@ -120,15 +141,6 @@ private:
 
     /// Random number generator seed
     static const int kSeed = 12345;
-
-    // Fields that are specific to a leaf node
-    struct Leaf {
-        // the identifier that will be used to represent the word associated with this leaf
-        Word word;
-
-        // the observed frequency of the word in the training corpus (number of images having an occurence of the word)
-        unsigned frequency;
-    };
 
     // Information associated with a single child of a node
     struct Child {
@@ -144,23 +156,29 @@ private:
 
     // Representation of a vocabulary tree node
     struct Node {
-        Node(Leaf&& leaf): node_type(std::move(leaf)) {}
+        Node(Word word): node_type(word) {}
         Node(Children&& children): node_type(std::move(children)) {}
 
-        std::variant<Leaf, Children> node_type;
+        std::variant<Word, Children> node_type;
     };
 
     NodePointer ComputeSubtree(size_t level, const FeatureDescriptors& descriptors);
 
     static size_t FindClosest(const Children& subtrees, const FeatureDescriptor& descriptor);
 
-    const Leaf& FindLeaf(const FeatureDescriptor& descriptor) const;
+    const Word FindWord(const FeatureDescriptor& descriptor) const;
 
     // root of the vocabulary tree
     NodePointer root_; 
 
     // total number of words in the vocabulary
     Word word_count_;
+
+    // number of occurrences of each word in training corpus
+    std::vector<unsigned> word_counts_;
+
+    // word weight based on inverse document frequency
+    std::vector<double> word_weights_;
 
     /// Random number generator to use
     std::default_random_engine random_engine_;
@@ -170,12 +188,17 @@ private:
 /// present in the image, the occurrence counts of the corresponding words.
 class ImageDescriptor {
 public:
-    using WordCount = uint32_t;
+    using WordWeight = double;
+    using Score = double;
 
     friend class Vocabulary;
+    friend class KeyframeIndex;
+
+    /// Calculate a similarity score for two image decriptors
+    static Score Similarity(const ImageDescriptor& first, const ImageDescriptor& second);
 
 private:
-    std::map<Vocabulary::Word, WordCount> descriptor_;
+    absl::btree_map<Vocabulary::Word, WordWeight> descriptor_;
 };
 
 
@@ -183,7 +206,7 @@ private:
 /// similarity.
 class KeyframeIndex {
 public:
-    KeyframeIndex();
+    KeyframeIndex(Vocabulary&& vocabulary);
     ~KeyframeIndex();
 
     // no copy construction, no assignment
@@ -194,31 +217,61 @@ public:
     KeyframeIndex& operator=(KeyframeIndex&&) = delete;
 
     /// Representation of a search result
-    class Result {
+    struct Result {
         /// pointer to the keyframe
         KeyframePointer keyframe;
 
         /// the associated match score
-        double score;
+        ImageDescriptor::Score score;
+
+        Result(const KeyframePointer& pointer, ImageDescriptor::Score value): keyframe(pointer), score(value) {}
     };
 
     /// Insert a keyframe into the search index.
     //
     // Should the descriptor become a member variable of the keyframe???
-    void Insert(const ImageDescriptor& descriptor, const KeyframePointer& keyframe);
+    void Insert(const KeyframePointer& keyframe);
     
     /// Remove a keyframe from the search index.
     void Delete(const KeyframePointer& keyframe);
 
     /// Retrieve the keyframes that best match the given query descriptor
     ///
-    /// \param query the image descriptor to be matched by the search results
+    /// \param query the keyframe to be matched by the search results
     /// \param results a container that will receive the search results
     /// \param max_results the maximum number of search results to return
-    void Search(const ImageDescriptor& query, std::vector<Result>& results,
+    void Search(const KeyframePointer& query, std::vector<Result>& results,
                 size_t max_results = 10) const;
 
+    Vocabulary& vocabulary() { return vocabulary_; }
+    const Vocabulary& vocabulary() const { return vocabulary_; }
+
 private:
+    using RowIndex = size_t;
+    using Column = absl::btree_set<RowIndex>;
+    using Columns = std::vector<Column>;
+
+    // Inverted index; for each Word in the vocabulary we have a column vector for row indices
+    Columns columns_;
+
+    struct Row {
+        KeyframePointer keyframe;
+    };
+
+    // Collection of keyframes
+    absl::btree_map<RowIndex, Row> rows_;
+
+    // Free list of empty slots
+    std::vector<RowIndex> free_list_;
+
+    // Reverse index
+    std::unordered_map<KeyframePointer, RowIndex> reverse_index_;
+
+    // Next insert location
+    RowIndex next_row_;
+
+    // the vocabulary used by the index
+    Vocabulary vocabulary_;
 };
 
 } // namespace slammer

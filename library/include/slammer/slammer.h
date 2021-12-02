@@ -41,6 +41,8 @@
 #include <chrono>
 #include <exception>
 #include <future>
+#include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <numeric>
@@ -50,8 +52,6 @@
 #include <variant>
 
 #include "boost/dynamic_bitset.hpp"
-#include "boost/archive/text_iarchive.hpp"
-#include "boost/archive/text_oarchive.hpp"
 
 #include "opencv2/opencv.hpp"
 #include "sophus/se3.hpp"
