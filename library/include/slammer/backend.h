@@ -36,6 +36,8 @@
 #include "slammer/slammer.h"
 #include "slammer/frontend.h"
 #include "slammer/map.h"
+#include "slammer/keyframe_index.h"
+
 
 namespace slammer {
 
@@ -55,14 +57,33 @@ public:
         // minimum number of matches against previous frame to work locally
         int min_feature_matches = 50;
 
+        // minimum number of matches against candidate frame to attempt loop closure
+        int min_loop_feature_matches = 40;
+
         // upper limit on the number of keyframes included in local optimization
         int max_keyframes_in_local_graph = 15;
 
         // number of solver iterations for local optimization
         int local_optimization_iterations = 10;
+
+        // maximum number of search results when querying index for loop candidates
+        int max_loop_candidiates = 10;
+
+        // ICP iteration limit
+        size_t max_iterations = 30;
+        
+        // ICP sample size
+        size_t sample_size = 10;
+        
+        /// ICP outlier factor
+        double outlier_factor = 7.16;        
+
+        // seed value for random number generator
+        int seed = 12345;
     };
 
-    Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map);
+    Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map,
+            KeyframeIndex& keyframe_index);
 
     // Disallow copy construction and copy assignment
     Backend(const Backend&) = delete;
@@ -72,6 +93,9 @@ public:
     void HandleRgbdFrameEvent(const RgbdFrameEvent& frame);
 
 private:
+    /// map type used to temporarily map a landmark onto another one
+    using LandmarkMapping = std::unordered_map<LandmarkId, LandmarkId>;
+
     /// Match features from a new frame against features in a given reference frame.
     ///
     /// \param reference    Feature descriptors associated with the referene frames
@@ -81,22 +105,53 @@ private:
     /// Starting from the specified keyframe, extract the sub-graph of keyfraems and landmarks
     /// to use for a local bundle adjustment.
     ///
-    /// \param keyframe     the keyframe that anchors the subgraph to be extracted
+    /// \param seeds        the keyframes that anchors the subgraph to be extracted
     /// \param keyframes    the keyframes to be included in the subgraph
     /// \param landmarks    the landmarks to be included in the subgraph
-    void ExtractLocalGraph(const KeyframePointer& keyframe, Keyframes& keyframes,
-                           Landmarks& landmarks);
+    /// \param subgraph_limit   maximum number of keyframes to include
+    void ExtractLocalGraph(const Keyframes& seeds, Keyframes& keyframes,
+                           Landmarks& landmarks, size_t subgraph_limit);
+
+    /// Optimize poses within the subgraph induced by the given keyframes for loop closure.
+    /// Rather than updating pose information in place, we return it as a new vector of 
+    /// coordinates that are aligned based on index.
+    ///
+    /// \param keyframes    the keyframes included in the subgraph
+    /// \param from         origin of the new loop edge to be introduced   
+    /// \param to           destination of the new loop edge to be introduced
+    /// \param relative_motion an estimate for the relative motion between the poses to connect 
+    /// \return             the new keyframe poses calculated as result of the optimization process
+    Poses OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& from, 
+                            const KeyframePointer& to, SE3d relative_motion);
+
+    /// Estimate locations for the landmarks based on a new set of pose estimates for a given set
+    /// of keyframes
+    ///
+    /// \param keyframes    the keyframes included in the subgraph
+    /// \param landmarks    the landmarks included in the subgraph
+    /// \param poses        the new keyframe poses calculated as result of the optimization process
+    /// \return             an (initial) estimate of the landmark location based on the graph structure 
+    ///                     and keyframe poses
+    Locations EstimateLocations(const Keyframes& keyframes, const Landmarks& landmarks,
+                                const Poses& poses);
 
     /// Optimize poses and locations within the subgraph induced by the given keyframes and landmarks.
     /// Rather than updating pose and location information in place, we collect them into new
     /// data structures that are aligned based on index.
     ///
+    /// Landmarks in the sub-graph that are in the range of the provided mapping will be treated as identical
+    /// to the landmark they are mapped to.
+    ///
     /// \param keyframes    the keyframes included in the subgraph
     /// \param landmarks    the landmarks included in the subgraph
-    /// \param poses        the new keyframe poses calculated as result of the optimization process
-    /// \param locations    the new landmark locations calculated as result of the optimization process
+    /// \param poses        (out) the new keyframe poses calculated as result of the optimization process
+    /// \param locations    (out) the new landmark locations calculated as result of the optimization process
+    /// \param mapping      assume the unification of landmarks based on this mapping    
+    ///\param poses_as_input utilize poses and locations both as input and output value
     void OptimizePosesAndLocations(const Keyframes& keyframes, const Landmarks& landmarks,
-                                   Poses& poses, Locations& locations);
+                                   Poses& poses, Locations& locations, 
+                                   const LandmarkMapping& mapping = LandmarkMapping {},
+                                   bool poses_as_input = false);
 
     /// Incorporate updated keyframe pose and landmark location information into the map.
     ///
@@ -120,9 +175,14 @@ private:
     /// The sparse map we are populating
     Map& map_;
 
+    /// The keyframe index
+    KeyframeIndex& keyframe_index_;
+
     /// Feature matcher
     cv::BFMatcher matcher_;
 
+    /// Random number generator to use
+    std::default_random_engine random_engine_;
 };
 
 } // namespace slammer

@@ -36,6 +36,7 @@
 #include "slammer/slammer.h"
 
 #include "absl/container/btree_map.h"
+#include "absl/container/btree_set.h"
 
 namespace slammer {
 
@@ -53,6 +54,8 @@ struct Keyframe;
 using KeyframePointer = std::shared_ptr<Keyframe>;
 using LandmarkPointer = std::shared_ptr<Landmark>;
 using FeaturePointer = std::shared_ptr<Feature>;
+
+using KeyframeSet = std::unordered_set<KeyframePointer>;
 
 class ImageDescriptor;
 
@@ -74,7 +77,13 @@ struct Keyframe: std::enable_shared_from_this<Keyframe> {
     bool pinned;
 
     // Image descriptor; will be filled in by KeyframeIndex
-    std::unique_ptr<ImageDescriptor> descriptor_;
+    std::unique_ptr<ImageDescriptor> descriptor;
+
+    // Covisible frames (should those be ordered by time)
+    KeyframeSet covisible;
+
+    // Pose graph edges; always go backwards in time
+    KeyframeSet neighbors;
 
     // TODO: Attached image/point cloud?
 };
@@ -124,7 +133,8 @@ struct Landmark: std::enable_shared_from_this<Landmark> {
 /// more previously generated ones.
 class Map {
 public:
-
+    ~Map();
+    
     // Disallow copy construction and copy assignment
     Map(const Map&) = delete;
     Map& operator=(const Map&) = delete;
@@ -150,6 +160,16 @@ public:
 
     /// Access a given landmark by id
     LandmarkPointer GetLandmark(LandmarkId id) const;
+
+    /// Retrieve all keyframes with covisibility
+    /// \param keyframe the keyframe for that all other keyframes observing a shared landmark should
+    ///                 be determined
+    /// \return A set of all frames sharing at least one common observed landmark. The `keyframe` itself is
+    ///         excluded.
+    KeyframeSet GetCovisibleKeyframes(const KeyframePointer& keyframe) const;
+
+    /// Create covisibility edges amongst keyframes
+    void CreateCovisibilityEdges(const KeyframePointer& keyframe);
 
     /// Is the map empty?
     bool has_keyframes() const { return !keyframes_.empty(); }

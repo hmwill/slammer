@@ -225,6 +225,10 @@ public:
         ImageDescriptor::Score score;
 
         Result(const KeyframePointer& pointer, ImageDescriptor::Score value): keyframe(pointer), score(value) {}
+
+        bool operator<(const Result& other) const {
+            return score < other.score;
+        }
     };
 
     /// Insert a keyframe into the search index.

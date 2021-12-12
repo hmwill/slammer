@@ -280,8 +280,8 @@ KeyframeIndex::KeyframeIndex(Vocabulary&& vocabulary)
 KeyframeIndex::~KeyframeIndex() {}
 
 void KeyframeIndex::Insert(const KeyframePointer& keyframe) {
-    if (!keyframe->descriptor_) {
-        keyframe->descriptor_ = vocabulary_.Encode(FeatureDescriptor::From(keyframe->descriptions));
+    if (!keyframe->descriptor) {
+        keyframe->descriptor = vocabulary_.Encode(FeatureDescriptor::From(keyframe->descriptions));
     }
 
     assert(reverse_index_.find(keyframe) == reverse_index_.end());
@@ -297,13 +297,13 @@ void KeyframeIndex::Insert(const KeyframePointer& keyframe) {
     reverse_index_[keyframe] = row_index;
     rows_[row_index] = Row { keyframe };
 
-    for (const auto& item: keyframe->descriptor_->descriptor_) {
+    for (const auto& item: keyframe->descriptor->descriptor_) {
         columns_[item.first].insert(row_index);
     }
 }
 
 void KeyframeIndex::Delete(const KeyframePointer& keyframe) {
-    assert(keyframe->descriptor_);
+    assert(keyframe->descriptor);
     
     auto reverse_row_iter = reverse_index_.find(keyframe);
     assert(reverse_row_iter != reverse_index_.end());
@@ -312,7 +312,7 @@ void KeyframeIndex::Delete(const KeyframePointer& keyframe) {
 
     rows_.erase(row_index);
 
-    for (const auto& item: keyframe->descriptor_->descriptor_) {
+    for (const auto& item: keyframe->descriptor->descriptor_) {
         columns_[item.first].erase(row_index);
     }
 
@@ -321,24 +321,37 @@ void KeyframeIndex::Delete(const KeyframePointer& keyframe) {
 
 void KeyframeIndex::Search(const KeyframePointer& query, std::vector<Result>& results,
                            size_t max_results) const {
-    if (!query->descriptor_) {
-        query->descriptor_ = vocabulary_.Encode(FeatureDescriptor::From(query->descriptions));
+    if (!query->descriptor) {
+        query->descriptor = vocabulary_.Encode(FeatureDescriptor::From(query->descriptions));
+    }
+
+    absl::btree_set<RowIndex> excluded_rows;
+
+    for (const auto& exclusion: query->covisible) {
+        auto iter = reverse_index_.find(exclusion);
+
+        if (iter != reverse_index_.end()) {
+            excluded_rows.insert(iter->second);
+        }
     }
 
     absl::btree_map<RowIndex, unsigned> word_counts;
 
-    for (const auto& item: query->descriptor_->descriptor_) {
+    for (const auto& item: query->descriptor->descriptor_) {
         Vocabulary::Word word = item.first;
         const auto& column = columns_[word];
 
         for (auto row_index: column) {
-            word_counts[row_index] += word;
+            if (!excluded_rows.contains(row_index)) {
+                word_counts[row_index] += word;
+            }
         }
     }
     
     unsigned max_word_count = std::accumulate(word_counts.begin(), word_counts.end(), 0u,
                                               [](unsigned max, const auto& item) { return std::max(max, item.second); });
     unsigned min_word_count = static_cast<unsigned>(0.8 * max_word_count);
+    std::vector<Result> result_candidates;
 
     for (const auto& item: word_counts) {
         if (item.second < min_word_count) {
@@ -347,14 +360,24 @@ void KeyframeIndex::Search(const KeyframePointer& query, std::vector<Result>& re
 
         RowIndex row_index = item.first;
         const KeyframePointer& candidate = rows_.find(row_index)->second.keyframe;
-        ImageDescriptor::Score score = ImageDescriptor::Similarity(*query->descriptor_, *candidate->descriptor_);
+        ImageDescriptor::Score score = ImageDescriptor::Similarity(*query->descriptor, *candidate->descriptor);
 
-        results.emplace_back(Result(candidate, score));
-        std::push_heap(results.begin(), results.end(), 
-                       [](const auto& first, const auto& second){ return first.score < second.score; });
+        result_candidates.emplace_back(Result(candidate, score));
+        std::push_heap(result_candidates.begin(), result_candidates.end());
     }
 
-    if (results.size() > max_results) {
-        results.erase(results.begin() + max_results, results.end());
+    std::sort_heap(result_candidates.begin(), result_candidates.end());
+
+    KeyframeSet ignore_set;
+
+    for (auto iter = result_candidates.rbegin(); 
+         iter != result_candidates.rend() && results.size() < max_results; ++iter) {
+
+        if (ignore_set.find(iter->keyframe) != ignore_set.end()) {
+            continue;
+        }
+
+        results.push_back(*iter);
+        ignore_set.insert(iter->keyframe->covisible.begin(), iter->keyframe->covisible.end());
     }
 }

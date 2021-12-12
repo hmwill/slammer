@@ -35,6 +35,17 @@
 
 using namespace slammer;
 
+Map::~Map() {
+    // because we have cyclic std::shared_ptr references, we break those cycles explicitly
+    for (const auto& iter: keyframes_) {
+        iter.second->covisible.clear();
+        iter.second->neighbors.clear();
+    }
+
+    keyframes_.clear();
+    landmarks_.clear();
+}
+
 KeyframePointer Map::CreateKeyframe(const RgbdFrameEvent& event) {
     auto result = std::make_shared<Keyframe>();
 
@@ -116,5 +127,32 @@ LandmarkPointer Map::GetLandmark(LandmarkId id) const {
         return iter->second;
     } else {
         return LandmarkPointer {};
+    }
+}
+
+KeyframeSet Map::GetCovisibleKeyframes(const KeyframePointer& keyframe) const {
+    KeyframeSet result;
+
+    for (const auto& feature: keyframe->features) {
+        auto landmark = feature->landmark.lock();
+
+        for (const auto& observation: landmark->observations) {
+            auto observed_frame = observation.lock()->keyframe.lock();
+
+            if (observed_frame != keyframe) {
+                result.insert(observed_frame);
+            }
+        }
+    }
+
+    return result;
+}
+
+void Map::CreateCovisibilityEdges(const KeyframePointer& keyframe) {
+    auto other_frames = GetCovisibleKeyframes(keyframe);
+
+    for (const auto& frame: other_frames) {
+        frame->covisible.insert(keyframe);
+        keyframe->covisible.insert(frame);
     }
 }

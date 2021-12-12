@@ -49,6 +49,7 @@
 #include <random>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 
 #include "boost/dynamic_bitset.hpp"

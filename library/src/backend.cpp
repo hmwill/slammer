@@ -31,6 +31,7 @@
 #include "slammer/backend.h"
 
 #include "slammer/map.h"
+#include "slammer/math.h"
 
 #include "g2o/types/slam3d/types_slam3d.h"
 #include "g2o/core/sparse_optimizer.h"
@@ -52,16 +53,22 @@ void MatchFeaturesToLandmarks(KeyframePointer& reference_frame, KeyframePointer&
         auto landmark = reference_frame->features[match.trainIdx]->landmark.lock();
         new_frame->features[match.queryIdx]->landmark = landmark;
         landmark->observations.push_back(new_frame->features[match.queryIdx]);
-
-        // NOTE: only the topology is being updated here; numerical values will be adjusted via bundle adjustment
     }
 }
 
+/// Convert a Sophus SE(3) element to an Isometry3 value accepted by g2o
+inline g2o::Isometry3 IsometryFromSE3d(const SE3d& se3d) {
+    auto rotation = se3d.unit_quaternion();
+    auto translation = se3d.translation();
+    return Eigen::Translation3d(translation) * Eigen::AngleAxisd(rotation);
 }
 
-Backend::Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map)
+} // namespace
+
+Backend::Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map, 
+                 KeyframeIndex& keyframe_index)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera),
-        map_(map), matcher_(cv::NORM_HAMMING, true) {}
+        map_(map), keyframe_index_(keyframe_index), matcher_(cv::NORM_HAMMING, true) {}
 
 void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
     auto previous_frame = map_.GetMostRecentKeyframe();
@@ -81,11 +88,14 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
     if (previous_frame_matches.size() > parameters_.min_feature_matches) {
         MatchFeaturesToLandmarks(previous_frame, keyframe, previous_frame_matches);
         map_.CreateLandmarksForUnmappedFeatures(*frame.info.rgb, keyframe);
+        map_.CreateCovisibilityEdges(keyframe);
+        keyframe->neighbors.insert(previous_frame);
 
         Keyframes keyframes;
         Landmarks landmarks;
+        Keyframes seeds { keyframe };
 
-        ExtractLocalGraph(keyframe, keyframes, landmarks);
+        ExtractLocalGraph(seeds, keyframes, landmarks, parameters_.max_keyframes_in_local_graph);
 
         Poses poses;
         Locations locations;
@@ -93,7 +103,70 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
         OptimizePosesAndLocations(keyframes, landmarks, poses, locations);
         UpdatePosesAndLocations(keyframes, landmarks, poses, locations);
 
-        // TODO: Perform a loop-closure test; potentially trigger a global BA
+        std::vector<KeyframeIndex::Result> loop_candidates;
+        keyframe_index_.Search(keyframe, loop_candidates, parameters_.max_loop_candidiates);
+
+        for (const auto& result: loop_candidates) {
+            auto matches = MatchFeatures(keyframe->descriptions, result.keyframe->descriptions);
+
+            if (matches.size() < parameters_.min_loop_feature_matches) {
+                continue;
+            }
+
+            std::vector<Point3d> keyframe_points, candidate_points;
+
+            for (const auto& match: matches) {
+                auto keyframe_keypoint = keyframe->features[match.trainIdx]->keypoint.pt;
+                auto keyframe_depth = keyframe->features[match.trainIdx]->depth;
+                keyframe_points.push_back(rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth));
+
+                auto candidate_keypoint = keyframe->features[match.queryIdx]->keypoint.pt;
+                auto candidate_depth = keyframe->features[match.queryIdx]->depth;
+                candidate_points.push_back(rgb_camera_.PixelToCamera(candidate_keypoint, candidate_depth));
+            }
+
+            SE3d relative_motion;
+            std::vector<uchar> mask;
+
+            size_t num_inliers = 
+                RobustIcp(candidate_points, keyframe_points,
+                          random_engine_, relative_motion, mask,
+                          parameters_.max_iterations, parameters_.sample_size, 
+                          parameters_.outlier_factor);            
+
+            Keyframes keyframes;
+            Landmarks landmarks;
+
+            seeds.pop_back();
+            seeds.push_back(result.keyframe);
+
+            ExtractLocalGraph(seeds, keyframes, landmarks, std::numeric_limits<size_t>::max());
+
+            Poses poses = OptimizeLoopPoses(keyframes, keyframe, result.keyframe, relative_motion);
+
+            std::unordered_map<LandmarkId, LandmarkId> landmark_mapping;
+
+            for (const auto& match: matches) {
+                auto source_landmark = keyframe->features[match.trainIdx]->landmark.lock();
+                auto target_landmark = result.keyframe->features[match.queryIdx]->landmark.lock();
+
+                landmark_mapping[source_landmark->id] = target_landmark->id;
+            }
+
+            Landmarks filtered_landmarks;
+
+            std::copy_if(landmarks.begin(), landmarks.end(), std::back_inserter(filtered_landmarks),
+                [&landmark_mapping](const auto& landmark) { 
+                    return landmark_mapping.find(landmark->id) == landmark_mapping.end();
+                }
+            );
+
+            Locations locations = EstimateLocations(keyframes, filtered_landmarks, poses);
+            OptimizePosesAndLocations(keyframes, filtered_landmarks, poses, locations, landmark_mapping, true);
+
+            // hoe do we determine if this is a good solution; that is, the loop closure was valid?
+        }
+
     } else {
         // perform a database search and position the frame against the best hits from
         // the search
@@ -122,8 +195,8 @@ std::vector<cv::DMatch> Backend::MatchFeatures(const cv::Mat& reference, const c
     return matches;
 }
 
-void Backend::ExtractLocalGraph(const KeyframePointer& keyframe, Keyframes& keyframes,
-                                Landmarks& landmarks) {
+void Backend::ExtractLocalGraph(const Keyframes& seeds, Keyframes& keyframes,
+                                Landmarks& landmarks, size_t subgraph_limit) {
     using std::begin, std::end;
 
     // This is used as max heap of keyframe timestamps to drive the BFS 
@@ -132,13 +205,15 @@ void Backend::ExtractLocalGraph(const KeyframePointer& keyframe, Keyframes& keyf
     std::map<Timestamp, KeyframePointer> keyframes_seen;
     std::unordered_map<LandmarkId, LandmarkPointer> landmarks_seen;
 
-    keyframes_seen[keyframe->timestamp] = keyframe;
-    timestamp_heap.push_back(keyframe->timestamp);
+    for (const auto& keyframe: seeds) {
+        keyframes_seen[keyframe->timestamp] = keyframe;
+        timestamp_heap.push_back(keyframe->timestamp);
+    }
 
     keyframes.clear();
     landmarks.clear();
 
-    while (keyframes.size() < parameters_.max_keyframes_in_local_graph && !timestamp_heap.empty()) {
+    while (keyframes.size() < subgraph_limit && !timestamp_heap.empty()) {
         // pop the highest key frame
         std::pop_heap(begin(timestamp_heap), end(timestamp_heap));
         auto frame = map_.GetKeyframe(timestamp_heap.back());
@@ -180,8 +255,9 @@ void Backend::ExtractLocalGraph(const KeyframePointer& keyframe, Keyframes& keyf
     } 
 }
 
-void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landmarks& landmarks,
-                                        Poses& poses, Locations& locations) {
+Backend::Poses 
+Backend::OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& from, 
+                           const KeyframePointer& to, SE3d relative_motion) {
     g2o::SparseOptimizer optimizer;
 
     typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;
@@ -193,8 +269,9 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
     optimizer.setAlgorithm(algorithm);
     optimizer.setVerbose(false);
 
-    std::map<Timestamp, size_t> keyframe_indices;
-    std::map<LandmarkId, size_t> landmark_indices;
+    absl::btree_map<Timestamp, size_t> keyframe_indices;
+
+    // Ceate the nodes of the graph
 
     for (size_t index = 0; index < keyframes.size(); ++index) {
         const auto& keyframe = keyframes[index];
@@ -203,10 +280,118 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
 
         auto vertex = new g2o::VertexSE3();
         vertex->setId(index);
-        auto rotation = keyframe->pose.unit_quaternion();
-        auto translation = keyframe->pose.translation();
-        g2o::Isometry3 pose = Eigen::Translation3d(translation) * Eigen::AngleAxisd(rotation);
-        vertex->setEstimate(pose);
+        vertex->setEstimate(IsometryFromSE3d(keyframe->pose));
+        vertex->setFixed(keyframe->pinned || keyframe == to);
+        optimizer.addVertex(vertex);
+    }
+
+    // Create the edges of the graph
+    auto create_edge = [&](size_t from_index, size_t to_index) {
+        const auto& from = keyframes[from_index];
+        const auto& to = keyframes[to_index];
+
+        auto edge = new g2o::EdgeSE3();
+        edge->setVertex(0, optimizer.vertex(from_index));
+        edge->setVertex(1, optimizer.vertex(to_index));
+        edge->setMeasurement(IsometryFromSE3d(to->pose * from->pose.inverse()));
+        edge->setInformation(g2o::EdgeSE3::InformationType::Identity());
+
+        // What is this?
+        edge->setParameterId(0, 0);
+        edge->setRobustKernel(new g2o::RobustKernelHuber());
+        optimizer.addEdge(edge);
+
+    };
+
+    for (size_t keyframe_index = 0; keyframe_index < keyframes.size(); ++keyframe_index) {
+        const auto& keyframe = keyframes[keyframe_index];
+
+        for (const auto& neighbor: keyframe->neighbors) {
+            auto neighbor_index = keyframe_indices[neighbor->timestamp];
+            create_edge(keyframe_index, neighbor_index);
+        }
+    }
+
+    create_edge(keyframe_indices[from->timestamp], keyframe_indices[to->timestamp]);
+
+    // Perform the actual optimization
+    optimizer.setVerbose(true); // while debugging
+    optimizer.initializeOptimization();
+    optimizer.optimize(parameters_.local_optimization_iterations);
+
+    // retrieve results
+    Poses poses;
+
+    for (size_t index = 0; index < keyframes.size(); ++index) {
+        auto vertex = dynamic_cast<g2o::VertexSE3 *>(optimizer.vertex(index));
+        auto isometry = vertex->estimate();
+        auto rotation = isometry.rotation();
+        auto translation = isometry.translation();
+        SE3d pose(rotation, translation);
+        poses.push_back(pose);
+    }
+
+    return poses;
+}
+
+Backend::Locations 
+Backend::EstimateLocations(const Keyframes& keyframes, const Landmarks& landmarks,
+                           const Poses& poses) {
+    Locations locations;
+    KeyframeSet keyframe_set(keyframes.begin(), keyframes.end());
+
+    for (const auto& landmark: landmarks) {
+        auto estimate = landmark->location;
+
+        for (const auto& observation: landmark->observations) {
+            auto feature = observation.lock();
+            auto keyframe = feature->keyframe.lock();
+
+            if (keyframe_set.find(keyframe) == keyframe_set.end()) {
+                continue;
+            }
+
+            auto keyframe_keypoint = feature->keypoint.pt;
+            auto keyframe_depth = feature->depth;
+            estimate = keyframe->pose.inverse() * rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth);
+
+            break;
+        }
+
+        locations.push_back(estimate);
+    }
+
+    return locations;
+}
+
+void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landmarks& landmarks,
+                                        Poses& poses, Locations& locations, const LandmarkMapping& mapping,
+                                        bool inout) {
+    assert(!inout || poses.size() == keyframes.size());
+    assert(!inout || locations.size() == landmarks.size());
+
+    g2o::SparseOptimizer optimizer;
+
+    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;
+    typedef g2o::LinearSolverCSparse<BlockSolverType::PoseMatrixType> LinearSolverType;
+
+    auto algorithm = new g2o::OptimizationAlgorithmLevenberg(
+        g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
+
+    optimizer.setAlgorithm(algorithm);
+    optimizer.setVerbose(false);
+
+    absl::btree_map<Timestamp, size_t> keyframe_indices;
+    absl::btree_map<LandmarkId, size_t> landmark_indices;
+
+    for (size_t index = 0; index < keyframes.size(); ++index) {
+        const auto& keyframe = keyframes[index];
+
+        keyframe_indices[keyframe->timestamp] = index;
+
+        auto vertex = new g2o::VertexSE3();
+        vertex->setId(index);
+        vertex->setEstimate(IsometryFromSE3d(inout ? poses[index] : keyframe->pose));
         vertex->setFixed(keyframe->pinned);
         optimizer.addVertex(vertex);
     }
@@ -229,7 +414,16 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
 
         for (const auto& feature: keyframe->features) {
             if (auto landmark = feature->landmark.lock()) {
-                auto landmark_iter = landmark_indices.find(landmark->id);
+                auto landmark_id = landmark->id;
+
+                // potentially the landmark has been remapped.
+                auto mapping_iter = mapping.find(landmark_id);
+
+                if (mapping_iter != mapping.end()) {
+                    landmark_id = mapping_iter->second;
+                }
+
+                auto landmark_iter = landmark_indices.find(landmark_id);
 
                 // Skip landmarks that don't contribute to the sub graph at hand
                 if (landmark_iter == landmark_indices.end()) {
@@ -244,8 +438,7 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
                 edge->setVertex( 0, optimizer.vertex(keyframe_index));
                 edge->setVertex( 1, optimizer.vertex(landmark_index + landmark_vertex_offset));
                 // TODO: At some point, we need to use robot coordinates instead of camera coordinates
-                Point3d measurement = rgb_camera_.PixelToCamera(feature->keypoint.pt, feature->depth);
-                edge->setMeasurement(measurement);
+                edge->setMeasurement(inout ? locations[landmark_index] : rgb_camera_.PixelToCamera(feature->keypoint.pt, feature->depth));
 
                 // TODO: Apply error model for depth measurement
                 edge->setInformation(Eigen::Matrix3d::Identity());
