@@ -156,6 +156,9 @@ public:
     LandmarkId CreateLandmark(const Camera& camera, const FeaturePointer& feature);
 
     /// Merge two landmarks into a single one
+    ///
+    /// \param primary this landmark will remain after the merge operation
+    /// \param secondary this landmark will be removed as part of the merge operation
     void MergeLandmarks(LandmarkId primary, LandmarkId secondary);
 
     /// Access a given landmark by id

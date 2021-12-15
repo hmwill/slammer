@@ -37,6 +37,7 @@
 #include <array>
 #include <bitset>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <chrono>
 #include <exception>

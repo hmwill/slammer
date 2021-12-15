@@ -75,6 +75,9 @@ struct RgbdFrameEvent: public Event {
     RgbdCameraInfo info;
 };
 
+// this is defined by the backend
+struct KeyframePoseEvent;
+
 /// Tracking frontend using RGBD camera images
 ///
 /// Color and depth images are not expected to be synchronized. Instead, the `trigger` property
@@ -160,6 +163,8 @@ public:
     /// Downstream modules subscribe here for notification when a new keyframe is available.
     /// Processing time should be minimal or move to a separate thread.
     EventListenerList<RgbdFrameEvent> keyframes;
+
+    void HandleKeyframePoseEvent(const KeyframePoseEvent& event);
 
 private:
     using KeyPoints = std::vector<cv::KeyPoint>;

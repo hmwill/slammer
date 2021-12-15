@@ -32,6 +32,7 @@
 
 #include "slammer/events.h"
 #include "slammer/math.h"
+#include "slammer/backend.h"
 
 
 using namespace slammer;
@@ -125,6 +126,11 @@ void RgbdFrontend::HandleDepthEvent(const ImageEvent& event) {
     }
 }
 
+void RgbdFrontend::HandleKeyframePoseEvent(const KeyframePoseEvent& event) {
+    // TODO: Implement this
+    assert(false);
+}
+
 void RgbdFrontend::ProcessFrame() {
     // Haven't received enough information yet; skip processing
     if (current_frame_data_.rgb.empty() || current_frame_data_.depth.empty())
@@ -202,6 +208,7 @@ void RgbdFrontend::ProcessFrame() {
         break;
     }
 
+    // TODO: This should be processed before a HandleKeyframePoseEvent gets handled
     previous_frame_data_ = current_frame_data_;
     relative_motion_ = current_pose_ * previous_pose_.inverse();
     relative_motion_twist_ = relative_motion_.log() * (1.0/(last_processed_time_ - now).count());

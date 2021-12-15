@@ -41,6 +41,11 @@
 
 namespace slammer {
 
+/// Event that is fired when a keyframe pose gest adjusted
+struct KeyframePoseEvent: public Event {
+    KeyframePointer keyframe;
+};
+
 /// \brief This class provides the backend process for Slammer
 class Backend {
 public:
@@ -60,6 +65,9 @@ public:
         // minimum number of matches against candidate frame to attempt loop closure
         int min_loop_feature_matches = 40;
 
+        // minimum number of inliers for a good feature-based match between frames
+        int min_inlier_matches = 25;
+
         // upper limit on the number of keyframes included in local optimization
         int max_keyframes_in_local_graph = 15;
 
@@ -68,6 +76,12 @@ public:
 
         // maximum number of search results when querying index for loop candidates
         int max_loop_candidiates = 10;
+
+        // maximum correction distance to allow for loop closure candidate
+        double max_loop_correction_distance = M_2_PI / 60.0;
+
+        // maximum angular correction to pose orientation to allow for loop closure candidate
+        double max_loop_correction_angle = std::numeric_limits<double>::max(); 
 
         // ICP iteration limit
         size_t max_iterations = 30;
@@ -92,16 +106,42 @@ public:
     /// Handler function that is called by the frontend when a new frame is available
     void HandleRgbdFrameEvent(const RgbdFrameEvent& frame);
 
+    /// Event listeners interested in keyframe pose updates
+    EventListenerList<KeyframePoseEvent> keyframe_poses;
+
 private:
     /// map type used to temporarily map a landmark onto another one
     using LandmarkMapping = std::unordered_map<LandmarkId, LandmarkId>;
+
+    /// Feature matches that anchor two frames relative to each other
+    using FeatureMatches = std::vector<cv::DMatch>;
 
     /// Match features from a new frame against features in a given reference frame.
     ///
     /// \param reference    Feature descriptors associated with the referene frames
     /// \param query        Feature descriptors associated with the query frame
-    std::vector<cv::DMatch> MatchFeatures(const cv::Mat& reference, const cv::Mat& query);
+    FeatureMatches MatchFeatures(const cv::Mat& reference, const cv::Mat& query);
 
+    /// Insert a keyframe into the overall graph relative to the given refernce frame.
+    ///
+    /// \param keyframe         the new keyframe to insert into the graph
+    /// \param reference_frame  an existing frame in the graph, relative to which the new frame
+    ///                         is placed
+    /// \param matches          the feature matches between the two frame used to determine the 
+    ///                         relative placement   
+    void ExtendGraph(const KeyframePointer& keyframe, const KeyframePointer& reference_frame,
+                     const FeatureMatches& matches);
+
+    /// Determine a loop closure for the given keyframe.
+    ///
+    /// \param keyframe                 the keyframe for which we want to find a loop closure 
+    /// \param[out] loop_keyframe       the identified loop closure keyframe
+    /// \param[out] relative_motion     initial estimate for the relative motion between the two frames
+    /// \param[out] landmark_mapping    landmarks to fuse due to loop closure
+    /// \return true if a loop closure candidate was identified
+    bool DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePointer& loop_keyframe,
+                              SE3d& relative_motion, LandmarkMapping& landmark_mapping);
+                                                 
     /// Starting from the specified keyframe, extract the sub-graph of keyfraems and landmarks
     /// to use for a local bundle adjustment.
     ///

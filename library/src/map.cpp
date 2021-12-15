@@ -117,7 +117,42 @@ LandmarkId Map::CreateLandmark(const Camera& camera, const FeaturePointer& featu
 }
 
 void Map::MergeLandmarks(LandmarkId primary, LandmarkId secondary) {
-    assert(false);
+    auto landmark_from = GetLandmark(secondary);
+    auto landmark_to = GetLandmark(primary);
+
+    KeyframeSet keyframes_from, keyframes_to;
+
+    for (const auto& observation: landmark_to->observations) {
+        auto feature = observation.lock();
+        keyframes_to.insert(feature->keyframe.lock());
+    }
+
+    for (const auto& observation: landmark_from->observations) {
+        auto feature = observation.lock();
+        feature->landmark = landmark_to;
+        keyframes_from.insert(feature->keyframe.lock());
+        landmark_to->observations.push_back(feature);
+    }
+
+    landmark_from->observations.clear();
+
+    for (const auto& keyframe: keyframes_from) {
+        for (const auto& neighbor: keyframes_to) {
+            if (neighbor != keyframe) {
+                keyframe->covisible.insert(neighbor);
+            }
+        }
+    }
+
+    for (const auto& keyframe: keyframes_to) {
+        for (const auto& neighbor: keyframes_from) {
+            if (neighbor != keyframe) {
+                keyframe->covisible.insert(neighbor);
+            }
+        }
+    }
+
+    landmarks_.erase(landmark_from->id);
 }
 
 LandmarkPointer Map::GetLandmark(LandmarkId id) const {

@@ -47,7 +47,7 @@ namespace {
 
 // Link all features in the incoming new frame that have been matched against a given reference
 // frame to the landmarks already associated with their corresponding feature.
-void MatchFeaturesToLandmarks(KeyframePointer& reference_frame, KeyframePointer& new_frame,
+void MatchFeaturesToLandmarks(const KeyframePointer& reference_frame, const KeyframePointer& new_frame,
                               const std::vector<cv::DMatch>& matches) {
     for (const auto& match: matches) {
         auto landmark = reference_frame->features[match.trainIdx]->landmark.lock();
@@ -86,25 +86,45 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
     auto previous_frame_matches = MatchFeatures(previous_frame->descriptions, keyframe->descriptions);
 
     if (previous_frame_matches.size() > parameters_.min_feature_matches) {
-        MatchFeaturesToLandmarks(previous_frame, keyframe, previous_frame_matches);
-        map_.CreateLandmarksForUnmappedFeatures(*frame.info.rgb, keyframe);
-        map_.CreateCovisibilityEdges(keyframe);
-        keyframe->neighbors.insert(previous_frame);
+        ExtendGraph(keyframe, previous_frame, previous_frame_matches);
 
-        Keyframes keyframes;
-        Landmarks landmarks;
-        Keyframes seeds { keyframe };
+        KeyframePointer loop_keyframe;
+        SE3d relative_motion;
+        LandmarkMapping landmark_mapping;
 
-        ExtractLocalGraph(seeds, keyframes, landmarks, parameters_.max_keyframes_in_local_graph);
+        if (DetermineLoopClosure(keyframe, loop_keyframe, relative_motion, landmark_mapping)) {
 
-        Poses poses;
-        Locations locations;
+            Keyframes keyframes;
+            Landmarks landmarks;
 
-        OptimizePosesAndLocations(keyframes, landmarks, poses, locations);
-        UpdatePosesAndLocations(keyframes, landmarks, poses, locations);
+            Keyframes seeds { keyframe, loop_keyframe };
 
+            ExtractLocalGraph(seeds, keyframes, landmarks, std::numeric_limits<size_t>::max());
+            Poses poses = OptimizeLoopPoses(keyframes, keyframe, loop_keyframe, relative_motion);
+
+            Landmarks filtered_landmarks;
+
+            std::copy_if(landmarks.begin(), landmarks.end(), std::back_inserter(filtered_landmarks),
+                [&landmark_mapping](const auto& landmark) { 
+                    return landmark_mapping.find(landmark->id) == landmark_mapping.end();
+                }
+            );
+
+            Locations locations = EstimateLocations(keyframes, filtered_landmarks, poses);
+            OptimizePosesAndLocations(keyframes, filtered_landmarks, poses, locations, landmark_mapping, true);
+
+            std::for_each(landmark_mapping.begin(), landmark_mapping.end(),
+                [&](const auto& mapping){ map_.MergeLandmarks(mapping.second, mapping.first); });
+
+            UpdatePosesAndLocations(keyframes, filtered_landmarks, poses, locations);
+        }
+    } else {
         std::vector<KeyframeIndex::Result> loop_candidates;
         keyframe_index_.Search(keyframe, loop_candidates, parameters_.max_loop_candidiates);
+
+        KeyframePointer previous_frame;
+        std::vector<cv::DMatch> previous_frame_matches;
+        double match_score = 0.0;
 
         for (const auto& result: loop_candidates) {
             auto matches = MatchFeatures(keyframe->descriptions, result.keyframe->descriptions);
@@ -130,52 +150,141 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
 
             size_t num_inliers = 
                 RobustIcp(candidate_points, keyframe_points,
-                          random_engine_, relative_motion, mask,
-                          parameters_.max_iterations, parameters_.sample_size, 
-                          parameters_.outlier_factor);            
+                            random_engine_, relative_motion, mask,
+                            parameters_.max_iterations, parameters_.sample_size, 
+                            parameters_.outlier_factor);        
+
+            if (num_inliers < parameters_.min_inlier_matches) {
+                continue;
+            }    
+
+            double score = result.score * num_inliers;
+
+            if (score > match_score) {
+                match_score = score;
+                previous_frame_matches = matches;
+                previous_frame = result.keyframe;
+            }
+        }
+
+        if (previous_frame) {
+            MatchFeaturesToLandmarks(previous_frame, keyframe, previous_frame_matches);
+            map_.CreateLandmarksForUnmappedFeatures(rgb_camera_, keyframe);
+            map_.CreateCovisibilityEdges(keyframe);
+            keyframe->neighbors.insert(previous_frame);
 
             Keyframes keyframes;
             Landmarks landmarks;
+            Keyframes seeds { keyframe };
 
-            seeds.pop_back();
-            seeds.push_back(result.keyframe);
+            ExtractLocalGraph(seeds, keyframes, landmarks, parameters_.max_keyframes_in_local_graph);
 
-            ExtractLocalGraph(seeds, keyframes, landmarks, std::numeric_limits<size_t>::max());
+            Poses poses;
+            Locations locations;
 
-            Poses poses = OptimizeLoopPoses(keyframes, keyframe, result.keyframe, relative_motion);
+            OptimizePosesAndLocations(keyframes, landmarks, poses, locations);
+            UpdatePosesAndLocations(keyframes, landmarks, poses, locations);
+        } else {
+            map_.CreateLandmarksForUnmappedFeatures(*frame.info.rgb, keyframe);
+        }
+    }
 
-            std::unordered_map<LandmarkId, LandmarkId> landmark_mapping;
+    // Notify listeners of an update keyframe pose
+    KeyframePoseEvent event;
+    event.timestamp = keyframe->timestamp;
+    event.keyframe = keyframe;
 
-            for (const auto& match: matches) {
-                auto source_landmark = keyframe->features[match.trainIdx]->landmark.lock();
-                auto target_landmark = result.keyframe->features[match.queryIdx]->landmark.lock();
+    keyframe_poses.HandleEvent(event);
+}
 
-                landmark_mapping[source_landmark->id] = target_landmark->id;
-            }
+void Backend::ExtendGraph(const KeyframePointer& keyframe, const KeyframePointer& reference_frame,
+                          const FeatureMatches& matches) {
+    MatchFeaturesToLandmarks(reference_frame, keyframe, matches);
+    map_.CreateLandmarksForUnmappedFeatures(rgb_camera_, keyframe);
+    map_.CreateCovisibilityEdges(keyframe);
+    keyframe->neighbors.insert(reference_frame);
 
-            Landmarks filtered_landmarks;
+    Keyframes keyframes;
+    Landmarks landmarks;
+    Keyframes seeds { keyframe };
 
-            std::copy_if(landmarks.begin(), landmarks.end(), std::back_inserter(filtered_landmarks),
-                [&landmark_mapping](const auto& landmark) { 
-                    return landmark_mapping.find(landmark->id) == landmark_mapping.end();
-                }
-            );
+    ExtractLocalGraph(seeds, keyframes, landmarks, parameters_.max_keyframes_in_local_graph);
 
-            Locations locations = EstimateLocations(keyframes, filtered_landmarks, poses);
-            OptimizePosesAndLocations(keyframes, filtered_landmarks, poses, locations, landmark_mapping, true);
+    Poses poses;
+    Locations locations;
 
-            // hoe do we determine if this is a good solution; that is, the loop closure was valid?
+    OptimizePosesAndLocations(keyframes, landmarks, poses, locations);
+    UpdatePosesAndLocations(keyframes, landmarks, poses, locations);
+}
+
+bool Backend::DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePointer& loop_keyframe,
+                                   SE3d& relative_motion, LandmarkMapping& landmark_mapping) {
+    std::vector<KeyframeIndex::Result> loop_candidates;
+    keyframe_index_.Search(keyframe, loop_candidates, parameters_.max_loop_candidiates);
+
+    for (const auto& result: loop_candidates) {
+        auto matches = MatchFeatures(keyframe->descriptions, result.keyframe->descriptions);
+
+        if (matches.size() < parameters_.min_loop_feature_matches) {
+            continue;
         }
 
-    } else {
-        // perform a database search and position the frame against the best hits from
-        // the search
+        std::vector<Point3d> keyframe_points, candidate_points;
 
-        // match against best frame found
+        for (const auto& match: matches) {
+            auto keyframe_keypoint = keyframe->features[match.trainIdx]->keypoint.pt;
+            auto keyframe_depth = keyframe->features[match.trainIdx]->depth;
+            keyframe_points.push_back(rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth));
 
-        // Compute a local, bundle adjustment using connectivity information
+            auto candidate_keypoint = keyframe->features[match.queryIdx]->keypoint.pt;
+            auto candidate_depth = keyframe->features[match.queryIdx]->depth;
+            candidate_points.push_back(rgb_camera_.PixelToCamera(candidate_keypoint, candidate_depth));
+        }
+
+        SE3d relative_motion;
+        std::vector<uchar> mask;
+
+        size_t num_inliers = 
+            RobustIcp(candidate_points, keyframe_points,
+                        random_engine_, relative_motion, mask,
+                        parameters_.max_iterations, parameters_.sample_size, 
+                        parameters_.outlier_factor);            
+
+        if (num_inliers < parameters_.min_inlier_matches) {
+            continue;
+        }    
+
+        // Characterize the correction amount for the proposed loop closure
+        auto loop_correction = relative_motion.inverse() * (keyframe->pose * result.keyframe->pose.inverse());
+        auto loop_correction_rotation = loop_correction.unit_quaternion();
+        auto loop_correction_angle = 
+            2.0 * atan2(loop_correction_rotation.vec().norm(), fabs(loop_correction_rotation.w()));
+        auto loop_correction_distance = loop_correction.translation().norm();
+
+        if (loop_correction_distance > parameters_.max_loop_correction_distance ||
+            loop_correction_angle > parameters_.max_loop_correction_angle) {
+            // Skipping this candidate for loop closure; amount of correction is suspiciously high
+            // Question: Is there truly a meanigful constant upper limit?
+            continue;
+        }
+
+        KeyframePointer loop_keyframe = result.keyframe;
+
+        // TODO: #1 Change the logic to return best candidate, not first valid candidate
+        // https://github.com/hmwill/slammer/issues/1
+        for (const auto& match: matches) {
+            auto source_landmark = keyframe->features[match.trainIdx]->landmark.lock();
+            auto target_landmark = loop_keyframe->features[match.queryIdx]->landmark.lock();
+
+            landmark_mapping[source_landmark->id] = target_landmark->id;
+        }
+
+        return true;
     }
+
+    return false;
 }
+
 
 std::vector<cv::DMatch> Backend::MatchFeatures(const cv::Mat& reference, const cv::Mat& query) {
     std::vector<cv::DMatch> matches;
@@ -286,21 +395,20 @@ Backend::OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& fr
     }
 
     // Create the edges of the graph
-    auto create_edge = [&](size_t from_index, size_t to_index) {
+    auto create_edge = [&](size_t from_index, size_t to_index) -> g2o::EdgeSE3* {
         const auto& from = keyframes[from_index];
         const auto& to = keyframes[to_index];
 
         auto edge = new g2o::EdgeSE3();
         edge->setVertex(0, optimizer.vertex(from_index));
         edge->setVertex(1, optimizer.vertex(to_index));
-        edge->setMeasurement(IsometryFromSE3d(to->pose * from->pose.inverse()));
         edge->setInformation(g2o::EdgeSE3::InformationType::Identity());
 
         // What is this?
         edge->setParameterId(0, 0);
         edge->setRobustKernel(new g2o::RobustKernelHuber());
-        optimizer.addEdge(edge);
 
+        return edge;
     };
 
     for (size_t keyframe_index = 0; keyframe_index < keyframes.size(); ++keyframe_index) {
@@ -308,11 +416,16 @@ Backend::OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& fr
 
         for (const auto& neighbor: keyframe->neighbors) {
             auto neighbor_index = keyframe_indices[neighbor->timestamp];
-            create_edge(keyframe_index, neighbor_index);
+            auto edge = create_edge(keyframe_index, neighbor_index);
+            edge->setMeasurementFromState();
+            optimizer.addEdge(edge);
         }
     }
 
-    create_edge(keyframe_indices[from->timestamp], keyframe_indices[to->timestamp]);
+    // add the loop closure constraint
+    auto edge = create_edge(keyframe_indices[from->timestamp], keyframe_indices[to->timestamp]);
+    edge->setMeasurement(IsometryFromSE3d(relative_motion));
+    optimizer.addEdge(edge);
 
     // Perform the actual optimization
     optimizer.setVerbose(true); // while debugging
