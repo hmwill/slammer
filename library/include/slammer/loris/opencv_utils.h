@@ -34,6 +34,7 @@
 #pragma once
 
 #include "slammer/slammer.h"
+#include "slammer/camera.h"
 
 #include <string>
 #include <unordered_map>
@@ -96,6 +97,21 @@ using FrameSet = std::unordered_map<FrameName, Frame>;
 
 /// Read the frame transformation information for the dataset identified by the provided path
 Result<FrameSet> ReadFrames(const std::string& transformations_path);
+
+/// Create a camera based on camera parameters and a transformation describing the pose
+///
+/// \param parameters       camera parameters as maintained by OpenCV
+/// \param pose             the camera pose relative to the robot frame
+///
+/// \return                 a camera object for the SLAM enginer
+Camera CreateCamera(const CameraParameters& parameters, const SE3d& pose);
+
+/// Retrieve the pose relative to origin (base_link) for a specific frame
+///
+/// \param frames   the frame set describing relative poses of frames to each other
+/// \param name     the name of the specific frame whose absolute pose we want to retrieve
+/// \return         the pose relative to the origin (base_link) or a failure if the name could not be fully resolved
+Result<SE3d> GetFramePose(const FrameSet& frames, const FrameName& name);
 
 } // namespace loris
 } // namespace slammer

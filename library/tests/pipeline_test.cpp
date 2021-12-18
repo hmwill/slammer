@@ -32,8 +32,47 @@
 
 #include <gtest/gtest.h>
 
-#include "slammer/backend.h"
+#include "slammer/pipeline.h"
+#include "slammer/loris/driver.h"
+#include "slammer/loris/opencv_utils.h"
 
 using namespace slammer;
+using namespace slammer::loris;
 
 
+TEST(PipelineTest, RunPipeline) {
+    using namespace std::placeholders;
+
+    std::string kDataSetPath("data/cafe1-1");
+
+    Result<SensorInfo> sensor_info_result = ReadSensorInfo(kDataSetPath);
+    EXPECT_TRUE(sensor_info_result.ok());
+    auto sensor_info = sensor_info_result.value();
+
+    Result<FrameSet> frame_info_result = ReadFrames(kDataSetPath);
+    EXPECT_TRUE(frame_info_result.ok());
+    auto frame_info = frame_info_result.value();
+
+    Driver driver(kDataSetPath, arrow::io::default_io_context());
+
+    auto rgb_camera_pose = GetFramePose(frame_info, "d400_color_optical_frame");
+    EXPECT_TRUE(rgb_camera_pose.ok());
+    auto depth_camera_pose = GetFramePose(frame_info, "d400_depth_optical_frame");
+    EXPECT_TRUE(depth_camera_pose.ok());
+
+    Camera rgb_camera = CreateCamera(sensor_info.d400_color_optical_frame, rgb_camera_pose.value());
+    Camera depth_camera = CreateCamera(sensor_info.d400_depth_optical_frame, depth_camera_pose.value());
+
+    Vocabulary vocabulary;
+
+    RgbdFrontend::Parameters frontend_parameters;
+    Backend::Parameters backend_parameters;
+
+    Pipeline pipeline(frontend_parameters, backend_parameters,
+        std::move(vocabulary), std::move(rgb_camera), std::move(depth_camera),
+        driver.color, driver.aligned_depth);
+
+    // run for 2 secs of simulated events
+    auto result = driver.Run(slammer::Timediff(2.0));
+    EXPECT_TRUE(result.ok());
+}

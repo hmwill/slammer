@@ -28,12 +28,29 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <stdexcept>
+#include "slammer/pipeline.h"
 
-#include <gtest/gtest.h>
-
-#include "slammer/backend.h"
 
 using namespace slammer;
 
 
+Pipeline::Pipeline(const RgbdFrontend::Parameters& frontend_parameters,
+                   const Backend::Parameters& backend_parameters,
+                   Vocabulary&& vocabulary, 
+                   Camera&& rgb_camera, Camera&& depth_camera,
+                   EventListenerList<ImageEvent>& color_source,
+                   EventListenerList<ImageEvent>& depth_source)
+    :   rgb_camera_(std::move(rgb_camera)),
+        depth_camera_(std::move(depth_camera)),
+        frontend_(frontend_parameters, rgb_camera_, depth_camera_),
+        keyframe_index_(std::move(vocabulary)),
+        backend_(backend_parameters, rgb_camera_, depth_camera_, map_, keyframe_index_)
+{
+    using namespace std::placeholders;
+    
+    frontend_.keyframes.AddHandler(std::bind(&Backend::HandleRgbdFrameEvent, &backend_, _1));
+    backend_.keyframe_poses.AddHandler(std::bind(&RgbdFrontend::HandleKeyframePoseEvent, &frontend_, _1));
+    
+    color_source.AddHandler(std::bind(&RgbdFrontend::HandleColorEvent, &frontend_, _1));
+    depth_source.AddHandler(std::bind(&RgbdFrontend::HandleDepthEvent, &frontend_, _1));
+}

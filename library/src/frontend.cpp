@@ -127,8 +127,12 @@ void RgbdFrontend::HandleDepthEvent(const ImageEvent& event) {
 }
 
 void RgbdFrontend::HandleKeyframePoseEvent(const KeyframePoseEvent& event) {
-    // TODO: Implement this
-    assert(false);
+    assert(event.timestamp == event.keyframe->timestamp);
+    keyframe_pose_updates_.push(KeyframePoseUpdate {
+        event.timestamp,
+        event.previous_pose,
+        event.keyframe->pose
+    });
 }
 
 void RgbdFrontend::ProcessFrame() {
@@ -137,6 +141,22 @@ void RgbdFrontend::ProcessFrame() {
         return;
 
     Timestamp now = std::max(current_frame_data_.time_depth, current_frame_data_.time_rgb);
+
+    // process any pending keyframe pose updates that the backend may have sent
+    while (!keyframe_pose_updates_.empty()) {
+        auto pose_update = keyframe_pose_updates_.front();
+        keyframe_pose_updates_.pop();
+
+        if (pose_update.timestamp <= last_keyframe_timestamp_) {
+
+            // relative_motion_ stays as is
+            // relative_motion_twist_stays as is
+            
+            auto last_relative = previous_pose_ * last_keyframe_pose_.inverse();
+            last_keyframe_pose_ = last_keyframe_pose_ * pose_update.previous_pose.inverse() * pose_update.new_pose;
+            previous_pose_ = last_relative * last_keyframe_pose_;
+        }
+    }
 
     // estimate the current pose 
     auto relative_motion = SE3d::exp(relative_motion_twist_ * (last_processed_time_ - now).count());
@@ -208,7 +228,6 @@ void RgbdFrontend::ProcessFrame() {
         break;
     }
 
-    // TODO: This should be processed before a HandleKeyframePoseEvent gets handled
     previous_frame_data_ = current_frame_data_;
     relative_motion_ = current_pose_ * previous_pose_.inverse();
     relative_motion_twist_ = relative_motion_.log() * (1.0/(last_processed_time_ - now).count());

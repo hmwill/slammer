@@ -31,7 +31,7 @@ include_directories(${Pangolin_INCLUDE_DIRS})
 find_package(OpenCV 4.5 REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})
 
-find_package(g2o REQUIRED)
+find_package(G2O REQUIRED)
 include_directories(${g2o_INCLUDE_DIRS})
 
 add_subdirectory(library)

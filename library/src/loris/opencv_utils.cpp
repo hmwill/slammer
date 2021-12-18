@@ -32,10 +32,18 @@
 
 #include <optional>
 
+#include <opencv2/core/eigen.hpp>
+
 using namespace slammer;
 using namespace loris;
 
 namespace {
+
+inline SE3d FromMat(cv::Mat mat) {
+    Eigen::Matrix4d matrix;
+    cv::cv2eigen(mat, matrix);
+    return SE3d(matrix);
+}
 
 std::optional<Error> ReadCommonParameters(const cv::FileNode& node, CommonParameters& common) {
     node["sensor_name"] >> common.sensor_name;
@@ -204,3 +212,31 @@ Result<FrameSet> slammer::loris::ReadFrames(const std::string& transformations_p
 }
 
 const FrameName slammer::loris::kBaseLink { "base_link" };
+
+Camera slammer::loris::CreateCamera(const CameraParameters& parameters, const SE3d& pose) {
+    auto fx = parameters.intrinsics.at<double>(0);
+    auto cx = parameters.intrinsics.at<double>(1);
+    auto fy = parameters.intrinsics.at<double>(2);
+    auto cy = parameters.intrinsics.at<double>(3);
+
+    return Camera (parameters.width, parameters.height, fx, fy, cx, cy, pose);
+}
+
+Result<SE3d> slammer::loris::GetFramePose(const FrameSet& frames, const FrameName& name) {
+    SE3d pose;
+    const FrameName* current_name = &name;
+
+    while (*current_name != kBaseLink) {
+        auto frame_iter = frames.find(*current_name);
+
+        if (frame_iter == frames.end()) {
+            std::string message = "Could not find frame '" + *current_name + "' in frame set";
+            return Error(message);
+        }
+
+        pose = FromMat(frame_iter->second.transformation) * pose;
+        current_name = &frame_iter->second.parent_name;
+    }
+
+    return pose;
+}

@@ -35,6 +35,8 @@
 
 using namespace slammer;
 
+Map::Map() {}
+
 Map::~Map() {
     // because we have cyclic std::shared_ptr references, we break those cycles explicitly
     for (const auto& iter: keyframes_) {

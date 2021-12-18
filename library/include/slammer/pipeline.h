@@ -28,12 +28,45 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <stdexcept>
+#ifndef SLAMMER_PIPELINE_H
+#define SLAMMER_PIPELINE_H
 
-#include <gtest/gtest.h>
+#pragma once
+
+#include "slammer/slammer.h"
+#include "slammer/events.h"
 
 #include "slammer/backend.h"
+#include "slammer/camera.h"
+#include "slammer/frontend.h"
+#include "slammer/map.h"
+#include "slammer/keyframe_index.h"
 
-using namespace slammer;
+namespace slammer {
 
+class Pipeline {
+public:
+    Pipeline(const RgbdFrontend::Parameters& frontend_parameters,
+             const Backend::Parameters& backend_parameters,
+             Vocabulary&& vocabulary, Camera&& rgb_camera, Camera&& depth_camera,
+             EventListenerList<ImageEvent>& color_source,
+             EventListenerList<ImageEvent>& depth_source
+);
 
+    Pipeline(const Pipeline&) = delete;
+    Pipeline& operator=(const Pipeline&) = delete;
+
+private:
+    Camera rgb_camera_;
+    Camera depth_camera_;
+
+    Map map_;
+
+    RgbdFrontend frontend_;
+    KeyframeIndex keyframe_index_;
+    Backend backend_;
+};
+
+} // namespace slammer
+
+#endif //ndef SLAMMER_PIPELINE_H

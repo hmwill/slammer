@@ -73,6 +73,7 @@ Backend::Backend(const Parameters& parameters, const Camera& rgb_camera, const C
 void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
     auto previous_frame = map_.GetMostRecentKeyframe();
     auto keyframe = map_.CreateKeyframe(frame);
+    auto original_pose = keyframe->pose;
 
     if (!previous_frame) {
         // This is the first frame; let's just create landmarks for the features we have
@@ -193,6 +194,7 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
     KeyframePoseEvent event;
     event.timestamp = keyframe->timestamp;
     event.keyframe = keyframe;
+    event.previous_pose = original_pose;
 
     keyframe_poses.HandleEvent(event);
 }

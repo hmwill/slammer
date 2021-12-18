@@ -47,6 +47,7 @@
 #include <map>
 #include <memory>
 #include <numeric>
+#include <queue>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -56,6 +57,10 @@
 #include "boost/dynamic_bitset.hpp"
 
 #include "opencv2/opencv.hpp"
+
+#include "Eigen/Core" 
+#include "Eigen/LU" 
+
 #include "sophus/se3.hpp"
 
 using namespace std::string_literals;

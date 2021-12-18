@@ -168,6 +168,13 @@ public:
 
 private:
     using KeyPoints = std::vector<cv::KeyPoint>;
+    struct KeyframePoseUpdate {
+        Timestamp timestamp;
+        SE3d previous_pose;
+        SE3d new_pose;
+    };
+
+    using KeyframePoseUpdates = std::queue<KeyframePoseUpdate>;
 
     /// Process the next frame and create an updated pose estimation
     void ProcessFrame();
@@ -197,10 +204,10 @@ private:
     Parameters parameters_;
 
     /// Parameters describing the RGB camera
-    Camera rgb_camera_;
+    const Camera& rgb_camera_;
 
     /// Parameters describing the depth camera
-    Camera depth_camera_;
+    const Camera& depth_camera_;
 
     /// Processing trigger
     Trigger trigger_;
@@ -225,6 +232,9 @@ private:
 
     /// Pose associated with the most recent key frame
     Sophus::SE3d last_keyframe_pose_;
+
+    /// Queue of keyframe pose adjustments coming back from the backend
+    KeyframePoseUpdates keyframe_pose_updates_;
 
     /// Previous frame data
     RgbdFrameData previous_frame_data_;

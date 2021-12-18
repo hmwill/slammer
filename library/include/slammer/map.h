@@ -133,6 +133,7 @@ struct Landmark: std::enable_shared_from_this<Landmark> {
 /// more previously generated ones.
 class Map {
 public:
+    Map();
     ~Map();
     
     // Disallow copy construction and copy assignment

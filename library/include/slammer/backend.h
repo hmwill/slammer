@@ -44,6 +44,7 @@ namespace slammer {
 /// Event that is fired when a keyframe pose gest adjusted
 struct KeyframePoseEvent: public Event {
     KeyframePointer keyframe;
+    SE3d previous_pose;
 };
 
 /// \brief This class provides the backend process for Slammer
@@ -207,10 +208,10 @@ private:
     Parameters parameters_;
 
     /// Parameters describing the RGB camera
-    Camera rgb_camera_;
+    const Camera& rgb_camera_;
 
     /// Parameters describing the depth camera
-    Camera depth_camera_;
+    const Camera& depth_camera_;
     
     /// The sparse map we are populating
     Map& map_;
