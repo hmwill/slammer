@@ -7,9 +7,14 @@ add_library(slammer_lib
   src/loris/arrow_utils.cpp src/loris/driver.cpp src/loris/opencv_utils.cpp src/loris/schema.cpp
 )
 
+
 target_include_directories(slammer_lib PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(slammer_lib
+  SuiteSparse::cholmod
 )
 
 add_executable(test_slammer_lib 
@@ -26,7 +31,7 @@ add_dependencies(test_slammer_lib slammer_lib)
 target_link_libraries(test_slammer_lib 
   slammer_lib arrow_shared ${OpenCV_LIBS} GTest::gtest GTest::gtest_main
   ${Boost_LIBRARIES}
-  g2o::core g2o::stuff g2o::types_slam3d g2o::solver_csparse
+  g2o::core g2o::stuff g2o::types_slam3d g2o::solver_cholmod
   Eigen3::Eigen
 )
 

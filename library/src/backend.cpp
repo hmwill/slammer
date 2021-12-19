@@ -39,7 +39,8 @@
 #include "g2o/core/robust_kernel.h"
 #include "g2o/core/robust_kernel_impl.h"
 #include "g2o/core/optimization_algorithm_levenberg.h"
-#include "g2o/solvers/csparse/linear_solver_csparse.h"
+#include "g2o/solvers/cholmod/linear_solver_cholmod.h"
+
 
 using namespace slammer;
 
@@ -372,7 +373,7 @@ Backend::OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& fr
     g2o::SparseOptimizer optimizer;
 
     typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;
-    typedef g2o::LinearSolverCSparse<BlockSolverType::PoseMatrixType> LinearSolverType;
+    typedef g2o::LinearSolverCholmod<BlockSolverType::PoseMatrixType> LinearSolverType;
 
     auto algorithm = new g2o::OptimizationAlgorithmLevenberg(
         g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
@@ -488,7 +489,7 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
     g2o::SparseOptimizer optimizer;
 
     typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;
-    typedef g2o::LinearSolverCSparse<BlockSolverType::PoseMatrixType> LinearSolverType;
+    typedef g2o::LinearSolverCholmod<BlockSolverType::PoseMatrixType> LinearSolverType;
 
     auto algorithm = new g2o::OptimizationAlgorithmLevenberg(
         g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
