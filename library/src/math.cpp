@@ -147,6 +147,8 @@ size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vect
         for (size_t index = 0; index < num_points; ++index) {
             Point3d diff = transformed[index] - estimate * reference[index];
             double squared_distance = diff.squaredNorm();
+
+            // TODO: Revisit the outlier check; what is the correct a priori assumption?
             bool is_inlier = squared_distance < outlier_factor ;//* variance;
             inliers[index] = is_inlier ? std::numeric_limits<uchar>::max() : 0;
             num_inliers += is_inlier;
