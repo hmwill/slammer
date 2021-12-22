@@ -123,6 +123,7 @@ size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vect
 
     // proper RANSAC starts here
     size_t best_num_inliers = 0;
+    inlier_mask.resize(num_points, 0);
     std::vector<size_t> indices(num_points);
     std::vector<uchar> inliers(num_points);
     std::vector<Point3d> sample_reference, sample_transformed;

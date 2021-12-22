@@ -309,6 +309,13 @@ size_t RgbdFrontend::FindFeaturesInCurrent(std::vector<Point2f>& current_points)
                              mask, error, window, parameters_.flow_pyramid_levels,
                              termination_criteria, cv::OPTFLOW_USE_INITIAL_FLOW);
 
+    for (size_t index = 0; index < current_points.size(); ++index) {
+        if (current_points[index].x < 0 || current_points[index].y < 0 ||
+            current_points[index].x >= rgb_camera_.width() || current_points[index].y >= rgb_camera_.height()) {
+            mask[index] = 0;
+        }
+    }
+
     Compress(tracked_features_, mask);
     Compress(tracked_feature_coords_, mask);
     Compress(current_points, mask);
