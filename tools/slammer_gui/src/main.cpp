@@ -30,9 +30,6 @@
 
 #include <cstdlib>
 
-#define _USE_MATH_DEFINES // for C++
-#include <cmath>
-
 #include "slammer/slammer.h"
 #include "slammer/loris/opencv_utils.h"
 
