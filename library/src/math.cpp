@@ -70,8 +70,8 @@ SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vec
     double factor = 1.0 / num_elements;
 
     // Calculate the centroids of the two point clouds
-    auto centroid_reference = std::accumulate(begin(reference), end(reference), Point3d()) * factor;
-    auto centroid_transformed = std::accumulate(begin(transformed), end(transformed), Point3d()) * factor;
+    auto centroid_reference = std::accumulate(begin(reference), end(reference), Point3d(0.0, 0.0, 0.0)) * factor;
+    auto centroid_transformed = std::accumulate(begin(transformed), end(transformed), Point3d(0.0, 0.0, 0.0)) * factor;
 
     // Calculate adjusted coordinates for each point cloud, where the centroid has been moved to the origin
     std::vector<Eigen::Vector3d> shifted_reference, shifted_transformed;
@@ -96,13 +96,13 @@ SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vec
     const auto& V = svd.matrixV();
 
     // Extract the transformation components
-    Eigen::Matrix3d rotation = U * V.transpose();
+    Eigen::Matrix3d rotation = V * U.transpose();
 
     if (rotation.determinant() < 0) {
         rotation = -rotation;
     }
 
-    Eigen::Vector3d translation = centroid_reference - centroid_transformed;
+    Eigen::Vector3d translation = centroid_transformed - rotation * centroid_reference;
     return SE3d(rotation, translation);
 }
 

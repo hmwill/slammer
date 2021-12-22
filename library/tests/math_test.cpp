@@ -34,4 +34,41 @@
 
 #include "slammer/math.h"
 
+#include "Eigen/Geometry"
+
 using namespace slammer;
+
+TEST(MathTest, TestIcp) {
+    std::default_random_engine random_engine(1234);
+    std::uniform_real_distribution<double> uniform_distribution(-10.0, 10.0);
+    std::uniform_real_distribution<double> noise_distribution(-0.1, 0.1);
+
+    for (double noise_level = 0.0; noise_level <= 1.0; noise_level += 1.0) {
+        std::vector<Point3d> reference, transformed;
+        Eigen::AngleAxisd angle_axis(0.34, Eigen::Vector3d(0.5, 0.3, 0.1).normalized());
+        SE3d::SO3Type::Transformation rotation = angle_axis.toRotationMatrix();
+        SE3d::TranslationType translation { 1.0, 2.0, 3.0 };
+        SE3d transformation(rotation, translation);
+
+        for (size_t index = 0; index < 10; ++index) {
+            double x = uniform_distribution(random_engine);
+            double y = uniform_distribution(random_engine);
+            double z = uniform_distribution(random_engine);
+            Point3d point(x, y, z);
+            reference.push_back(point);
+
+            double nx = noise_distribution(random_engine);
+            double ny = noise_distribution(random_engine);
+            double nz = noise_distribution(random_engine);
+            Point3d noise(nx, ny, nz);
+
+            auto transformed_point = transformation * point + noise * noise_level * 0.1;
+            transformed.push_back(transformed_point);
+        }
+
+        auto recovered_transformation = CalculateIcp(reference, transformed);
+
+        EXPECT_LE((recovered_transformation.so3().matrix() - rotation).norm(), 1.0E-2);
+        EXPECT_LE((recovered_transformation.translation() - translation).norm(), 1.0E-2);
+    }
+}
