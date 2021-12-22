@@ -108,7 +108,7 @@ SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vec
 
 size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
                           std::default_random_engine& random_engine,
-                          SE3d& transformation, std::vector<uchar>& inlier_mask,
+                          SE3d& best_estimate, std::vector<uchar>& inlier_mask,
                           size_t max_iterations, size_t sample_size, double outlier_factor) {
     size_t num_points = reference.size();
     assert(transformed.size() == num_points);
@@ -116,13 +116,12 @@ size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vect
     inlier_mask.clear();
 
     if (num_points <= sample_size) {
-        transformation = CalculateIcp(reference, transformed);
-        inlier_mask.resize(num_points, true);
+        best_estimate = CalculateIcp(reference, transformed);
+        inlier_mask.resize(num_points, std::numeric_limits<uchar>::max());
         return num_points;
     }
 
     // proper RANSAC starts here
-    SE3d best_estimate;
     size_t best_num_inliers = 0;
     std::vector<size_t> indices(num_points);
     std::vector<uchar> inliers(num_points);
@@ -148,8 +147,8 @@ size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vect
         for (size_t index = 0; index < num_points; ++index) {
             Point3d diff = transformed[index] - estimate * reference[index];
             double squared_distance = diff.squaredNorm();
-            bool is_inlier = squared_distance < outlier_factor * variance;
-            inliers[index] = is_inlier;
+            bool is_inlier = squared_distance < outlier_factor ;//* variance;
+            inliers[index] = is_inlier ? std::numeric_limits<uchar>::max() : 0;
             num_inliers += is_inlier;
         }
 

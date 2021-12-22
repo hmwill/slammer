@@ -62,13 +62,69 @@ TEST(MathTest, TestIcp) {
             double nz = noise_distribution(random_engine);
             Point3d noise(nx, ny, nz);
 
-            auto transformed_point = transformation * point + noise * noise_level * 0.1;
+            auto transformed_point = transformation * point + noise * noise_level;
             transformed.push_back(transformed_point);
         }
 
         auto recovered_transformation = CalculateIcp(reference, transformed);
 
         EXPECT_LE((recovered_transformation.so3().matrix() - rotation).norm(), 1.0E-2);
-        EXPECT_LE((recovered_transformation.translation() - translation).norm(), 1.0E-2);
+        EXPECT_LE((recovered_transformation.translation() - translation).norm(), 1.0E-1);
+    }
+}
+
+TEST(MathTest, RobustIcp) {
+    std::default_random_engine random_engine(1234);
+    std::uniform_real_distribution<double> uniform_distribution(-100.0, 100.0);
+    std::uniform_real_distribution<double> inlier_noise_distribution(-1.0, 1.0);
+    std::uniform_real_distribution<double> outlier_noise_distribution(20.0, 40.0);
+    std::uniform_real_distribution<double> outlier_distribution(0.0, 1.0);
+
+    const double outlier_fraction = 0.05;
+
+    std::vector<Point3d> reference, transformed;
+    Eigen::AngleAxisd angle_axis(0.84, Eigen::Vector3d(0.5, 0.3, 0.1).normalized());
+    SE3d::SO3Type::Transformation rotation = angle_axis.toRotationMatrix();
+    SE3d::TranslationType translation { 11.0, 23.0, 3.0 };
+    SE3d transformation(rotation, translation);
+    std::vector<uchar> inlier_mask;
+
+    for (size_t index = 0; index < 100; ++index) {
+        bool is_outlier = outlier_distribution(random_engine) < outlier_fraction;
+        inlier_mask.push_back(is_outlier ? 0 : std::numeric_limits<uchar>::max());
+
+        double x = uniform_distribution(random_engine);
+        double y = uniform_distribution(random_engine);
+        double z = uniform_distribution(random_engine);
+        Point3d point(x, y, z);
+        reference.push_back(point);
+
+        const auto& noise_distribution = is_outlier ? outlier_noise_distribution : inlier_noise_distribution;
+        double nx = noise_distribution(random_engine);
+        double ny = noise_distribution(random_engine);
+        double nz = noise_distribution(random_engine);
+        Point3d noise(nx, ny, nz);
+
+        auto transformed_point = transformation * point + noise;
+        transformed.push_back(transformed_point);
+    }
+
+    auto recovered_transformation = CalculateIcp(reference, transformed);
+
+    EXPECT_GE((recovered_transformation.so3().matrix() - rotation).norm(), 1.0E-2);
+    EXPECT_GE((recovered_transformation.translation() - translation).norm(), 1.0E-1);
+
+    SE3d robust_transformation;
+    std::vector<uchar> estimated_inlier_mask;
+
+    auto num_inliers = RobustIcp(reference, transformed, random_engine,
+                                 robust_transformation, estimated_inlier_mask,
+                                 30, 10, 3.0);
+
+    EXPECT_LE((robust_transformation.so3().matrix() - rotation).norm(), 1.0E-2);
+    EXPECT_LE((robust_transformation.translation() - translation).norm(), 0.5);
+
+    for (size_t index = 0; index < inlier_mask.size(); ++index) {
+        EXPECT_LE(inlier_mask[index], estimated_inlier_mask[index]);
     }
 }
