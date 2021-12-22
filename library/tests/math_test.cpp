@@ -111,8 +111,8 @@ TEST(MathTest, RobustIcp) {
 
     auto recovered_transformation = CalculateIcp(reference, transformed);
 
-    EXPECT_GE((recovered_transformation.so3().matrix() - rotation).norm(), 1.0E-2);
-    EXPECT_GE((recovered_transformation.translation() - translation).norm(), 1.0E-1);
+    EXPECT_GT((recovered_transformation.so3().matrix() - rotation).norm(), 1.0E-2);
+    EXPECT_GT((recovered_transformation.translation() - translation).norm(), 0.5);
 
     SE3d robust_transformation;
     std::vector<uchar> estimated_inlier_mask;
