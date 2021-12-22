@@ -71,6 +71,11 @@ public:
     float width() const { return width_; }
     float height() const { return height_; }
 
+    float fx() const { return fx_; }
+    float fy() const { return fy_; }
+    float cx() const { return cx_; }
+    float cy() const { return cy_; }
+
 private:
     /// Transformation matrix of camera frame to robot frame
     SE3d camera_to_robot_;

@@ -79,7 +79,8 @@ size_t CompressInto(const Data& input, const Mask& mask, Data& output) {
 
 RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera), 
-      status_(Status::kInitializing), random_engine_(parameters.seed) {
+      status_(Status::kInitializing), random_engine_(parameters.seed), trigger_(Trigger::kTriggerColor),
+      distance_since_last_keyframe_(0.0) {
     feature_detector_ = 
         //cv::GFTTDetector::create(parameters.num_features, parameters.quality_level, parameters.min_distance);
         cv::ORB::create(parameters_.num_features);
@@ -106,6 +107,8 @@ void RgbdFrontend::PostKeyframe() {
     feature_detector_->compute(current_frame_data_.rgb, event.keypoints, event.descriptions);
 
     keyframes.HandleEvent(event);
+
+    distance_since_last_keyframe_ = 0.0;
 }
 
 void RgbdFrontend::HandleColorEvent(const ImageEvent& event) {
@@ -158,16 +161,15 @@ void RgbdFrontend::ProcessFrame() {
         }
     }
 
-    // estimate the current pose 
-    auto relative_motion = SE3d::exp(relative_motion_twist_ * (last_processed_time_ - now).count());
-    current_pose_ = relative_motion * previous_pose_;
-
     switch (status_) {
     case Status::kInitializing:
         // For now the same as generation of new keyframe; may do more callibration in the future
 
     case Status::kNewKeyframe:
         {
+            // estimate the current pose; this could be any pose, actually, because we are starting over
+            current_pose_ = previous_pose_;
+
             ClearFeatureVectors();
             size_t num_features = DetectKeyframeFeatures();
 
@@ -185,6 +187,10 @@ void RgbdFrontend::ProcessFrame() {
 
     case Status::kTracking:
         {
+            // estimate the current pose 
+            auto relative_motion = SE3d::exp(relative_motion_twist_ * (last_processed_time_ - now).count());
+            current_pose_ = relative_motion * previous_pose_;
+
             previous_frame_data_ = current_frame_data_;
             std::vector<Point2f> current_points; 
 
@@ -192,12 +198,11 @@ void RgbdFrontend::ProcessFrame() {
             std::vector<Point3d> current_coords;
 
             for (const auto& point: current_points) {
-                float row = point.x, column = point.y; 
+                float column = point.x, row = point.y; 
                 auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));
                 current_coords.push_back(rgb_camera_.PixelToCamera(point, z));
             }    
 
-            SE3d relative_motion;
             std::vector<uchar> mask;
 
             num_features = 
@@ -214,8 +219,9 @@ void RgbdFrontend::ProcessFrame() {
 
             SE3d motion_since_last_keyframe = current_pose_ * last_keyframe_pose_.inverse();
             double traveled_distance = sqrt(motion_since_last_keyframe.translation().lpNorm<2>());
+            distance_since_last_keyframe_ += traveled_distance;
 
-            if (traveled_distance >= parameters_.max_keyframe_distance ||
+            if (distance_since_last_keyframe_ >= parameters_.max_keyframe_distance ||
                 num_features < parameters_.num_features_tracking_bad) {
                 // need to create a new keyframe in next iteration
                 status_ = Status::kNewKeyframe;
@@ -244,7 +250,7 @@ size_t RgbdFrontend::DetectKeyframeFeatures() {
     cv::KeyPoint::convert(key_points_, tracked_features_);
 
     for (const auto& point: key_points_) {
-        float row = point.pt.x, column = point.pt.y; 
+        float row = point.pt.y, column = point.pt.x; 
         auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));
         tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.pt, z));
     }    
@@ -266,7 +272,7 @@ size_t RgbdFrontend::DetectAdditionalFeatures() {
     feature_detector_->detect(current_frame_data_.rgb, additional_points, feature_mask);
 
     for (const auto& point: additional_points) {
-        float row = point.pt.x, column = point.pt.y; 
+        float row = point.pt.y, column = point.pt.x; 
         auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));
         tracked_features_.push_back(point.pt);
         tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.pt, z));
@@ -317,7 +323,7 @@ void RgbdFrontend::PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vec
     auto transform = camera_to_robot.inverse() * predicted_pose.inverse() * previous_pose_ * camera_to_robot;
 
     for (const auto& point: tracked_features_) {
-        float row = point.x, column = point.y; 
+        float row = point.y, column = point.x; 
         // Question: Just use value from single pixel, or do a weighted average across a small neighborhood?
         // What is the right rounding mode that's compatible with OpenCV feature and flow calculations?
         auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));

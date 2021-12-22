@@ -233,6 +233,9 @@ private:
     /// Pose associated with the most recent key frame
     Sophus::SE3d last_keyframe_pose_;
 
+    /// Distance since last keyframe
+    double distance_since_last_keyframe_;
+
     /// Queue of keyframe pose adjustments coming back from the backend
     KeyframePoseUpdates keyframe_pose_updates_;
 

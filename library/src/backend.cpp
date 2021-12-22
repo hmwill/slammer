@@ -525,6 +525,11 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
         optimizer.addVertex(vertex);
     }
 
+    g2o::ParameterCamera camera_parameters;
+    camera_parameters.setId(0);
+    camera_parameters.setKcam(rgb_camera_.fx(), rgb_camera_.fy(), rgb_camera_.cx(), rgb_camera_.cy());
+    optimizer.addParameter(&camera_parameters);
+
     for (size_t keyframe_index = 0; keyframe_index < keyframes.size(); ++keyframe_index) {
         const auto& keyframe = keyframes[keyframe_index];
 
