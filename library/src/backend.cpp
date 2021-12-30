@@ -409,7 +409,7 @@ Backend::OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& fr
         edge->setInformation(g2o::EdgeSE3::InformationType::Identity());
 
         // What is this?
-        edge->setParameterId(0, 0);
+        //edge->setParameterId(0, 0);
         edge->setRobustKernel(new g2o::RobustKernelHuber());
 
         return edge;
@@ -522,15 +522,16 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
         landmark_indices[landmark->id] = index;
 
         auto vertex = new g2o::VertexPointXYZ();
+        vertex->setMarginalized(true);
         vertex->setId(landmark_vertex_offset + index);
         vertex->setEstimate(landmark->location);
         optimizer.addVertex(vertex);
     }
 
-    g2o::ParameterCamera camera_parameters;
-    camera_parameters.setId(0);
-    camera_parameters.setKcam(rgb_camera_.fx(), rgb_camera_.fy(), rgb_camera_.cx(), rgb_camera_.cy());
-    optimizer.addParameter(&camera_parameters);
+    auto camera_parameters = new g2o::ParameterCamera();
+    camera_parameters->setId(0);
+    camera_parameters->setKcam(rgb_camera_.fx(), rgb_camera_.fy(), rgb_camera_.cx(), rgb_camera_.cy());
+    optimizer.addParameter(camera_parameters);
 
     for (size_t keyframe_index = 0; keyframe_index < keyframes.size(); ++keyframe_index) {
         const auto& keyframe = keyframes[keyframe_index];

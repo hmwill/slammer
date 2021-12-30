@@ -83,7 +83,11 @@ FeatureDescriptor::FeatureDescriptor(const uchar* bits) {
 // Vocabulary
 //
 
-Vocabulary::Vocabulary(): word_count_(0), random_engine_(kSeed) {}
+Vocabulary::Vocabulary(): word_count_(0), random_engine_(kSeed) {
+    FeatureDescriptors descriptors;
+    descriptors.emplace_back();
+    ComputeVocabulary(descriptors);
+}
 
 Vocabulary::Vocabulary(Vocabulary&& other) {
     std::swap(root_, other.root_);
@@ -275,6 +279,7 @@ ImageDescriptor::Score ImageDescriptor::Similarity(const ImageDescriptor& first,
 
 KeyframeIndex::KeyframeIndex(Vocabulary&& vocabulary)
     : vocabulary_(std::move(vocabulary)), next_row_(0) {
+    columns_.resize(vocabulary_.word_count());
 }
 
 KeyframeIndex::~KeyframeIndex() {}

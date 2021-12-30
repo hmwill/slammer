@@ -129,6 +129,8 @@ public:
     /// \param descriptors the feature descriptors to encode via the vocabulary
     std::unique_ptr<ImageDescriptor> Encode(const FeatureDescriptor::Set& descriptors) const;
 
+    size_t word_count() const { return word_count_; }
+    
 private:
     struct Node;
     using NodePointer = std::unique_ptr<Node>;

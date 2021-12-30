@@ -59,7 +59,9 @@ KeyframePointer Map::CreateKeyframe(const RgbdFrameEvent& event) {
         auto feature = std::make_shared<Feature>();
 
         feature->keypoint = keypoint;
-        feature->depth = std::numeric_limits<double>::signaling_NaN();
+        feature->depth = //std::numeric_limits<double>::signaling_NaN();
+            static_cast<double>(event.frame_data.depth.at<ushort>(keypoint.pt.y, keypoint.pt.x));
+
         feature->keyframe = result;
 
         result->features.emplace_back(std::move(feature));
