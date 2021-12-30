@@ -161,6 +161,9 @@ void RgbdFrontend::ProcessFrame() {
         }
     }
 
+    Status old_status = status_;
+    bool is_keyframe = false;
+
     switch (status_) {
     case Status::kInitializing:
         // For now the same as generation of new keyframe; may do more callibration in the future
@@ -176,6 +179,7 @@ void RgbdFrontend::ProcessFrame() {
             // if we have enough features, we can attempt to track in the next frame
             if (num_features >= parameters_.num_features_tracking) {
                 PostKeyframe();
+                is_keyframe = true;
                 status_ = Status::kTracking;
             } else {
                 // Are we sitting in the dark?
@@ -239,6 +243,8 @@ void RgbdFrontend::ProcessFrame() {
     relative_motion_twist_ = relative_motion_.log() * (1.0/(last_processed_time_ - now).count());
     previous_pose_ = current_pose_;
     last_processed_time_ = now;
+
+    PostProcessedFrame(now, old_status, status_, current_pose_, tracked_features_.size(), is_keyframe);
 }
 
 size_t RgbdFrontend::DetectKeyframeFeatures() {
@@ -341,6 +347,23 @@ void RgbdFrontend::PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vec
     }
 }
 
+
+void RgbdFrontend::PostProcessedFrame(Timestamp timestamp, Status old_state, Status new_state, const SE3d& pose,
+                                      size_t num_tracked_features, bool is_keyframe) {
+    if (processed_frames.has_listeners()) {
+        ProcessedFrameEvent event;
+
+        event.timestamp = timestamp;
+        event.old_state = old_state;
+        event.new_state = new_state;
+        event.pose = pose;
+        event.num_tracked_features = num_tracked_features;
+        event.is_keyframe = is_keyframe;
+
+        processed_frames.HandleEvent(event);
+    }
+}
+
 /*
 
 changes to the tracking algorithm:
@@ -360,3 +383,4 @@ changes to the tracking algorithm:
 - IMU will inform motion estimates if/once available (versus extrapolation)
 
 */
+

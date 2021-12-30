@@ -91,6 +91,8 @@ public:
         }
     }
 
+    bool has_listeners() const { return !handlers_.empty(); }
+
 private:
     std::vector<HandlerType> handlers_;
 };

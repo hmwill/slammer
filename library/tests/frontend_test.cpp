@@ -69,7 +69,67 @@ TEST(FrontendTest, RunFrontend) {
     driver.color.AddHandler(std::bind(&RgbdFrontend::HandleColorEvent, &frontend, _1));
     driver.aligned_depth.AddHandler(std::bind(&RgbdFrontend::HandleDepthEvent, &frontend, _1));
 
+    struct FrontendListener {
+        RgbdFrontend& frontend;
+        size_t num_frames, num_keyframes;
+        Timestamp min_time, max_time, last_timestamp;
+
+        FrontendListener(RgbdFrontend& frontend)
+            : frontend(frontend), num_frames(0), num_keyframes(0),
+                min_time(Timestamp(Timediff(std::numeric_limits<double>::max()))),
+                max_time(Timestamp(Timediff(std::numeric_limits<double>::min()))) {}
+
+        void HandleEvent(const ProcessedFrameEvent& event) {
+            if (num_frames) {
+                EXPECT_GT(event.timestamp, last_timestamp);
+                last_timestamp = event.timestamp;
+            }
+
+            ++num_frames;
+            num_keyframes += event.is_keyframe;
+
+            min_time = std::min(min_time, event.timestamp);
+            max_time = std::max(max_time, event.timestamp);
+
+            auto pose = event.pose;
+            auto rotation = pose.unit_quaternion();
+            auto translation = pose.translation();
+
+            EXPECT_FALSE(std::isnan(rotation.x()));
+            EXPECT_FALSE(std::isnan(rotation.y()));
+            EXPECT_FALSE(std::isnan(rotation.z()));
+            EXPECT_FALSE(std::isnan(rotation.w()));
+
+            EXPECT_FALSE(std::isnan(translation.x()));
+            EXPECT_FALSE(std::isnan(translation.y()));
+            EXPECT_FALSE(std::isnan(translation.z()));
+
+            // Make sure we do not loose track right after establishing a new keyframe
+            EXPECT_TRUE(event.new_state == RgbdFrontend::Status::kTracking ||
+                        event.old_state != RgbdFrontend::Status::kNewKeyframe);
+
+            if (event.old_state == RgbdFrontend::Status::kTracking &&
+                event.new_state == RgbdFrontend::Status::kTracking) {
+                EXPECT_GE(event.num_tracked_features, frontend.parameters().num_features_tracking_bad);
+            }
+
+            if (event.is_keyframe) {
+                EXPECT_GE(event.num_tracked_features, frontend.parameters().num_features_tracking);
+            }
+        }
+    };
+
+    FrontendListener listener(frontend);
+    frontend.processed_frames.AddHandler(std::bind(&FrontendListener::HandleEvent, &listener, _1));
+
     // run for 2 secs of simulated events
     auto result = driver.Run(slammer::Timediff(2.0));
     EXPECT_TRUE(result.ok());
+    EXPECT_LE(listener.max_time - listener.min_time, Timediff(2.0));
+
+    // 2 secs @ 30 frames/sec, minus 1 frame because the recording doesn't start with a frame at the very beginning
+    EXPECT_EQ(listener.num_frames, 59);
+
+    // Pretty high number of keyframes! What's going on?
+    EXPECT_EQ(listener.num_keyframes, 28);
 }

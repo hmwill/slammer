@@ -78,6 +78,9 @@ struct RgbdFrameEvent: public Event {
 // this is defined by the backend
 struct KeyframePoseEvent;
 
+// forward declaration
+struct ProcessedFrameEvent;
+
 /// Tracking frontend using RGBD camera images
 ///
 /// Color and depth images are not expected to be synchronized. Instead, the `trigger` property
@@ -157,12 +160,18 @@ public:
     void set_trigger(Trigger trigger) { trigger_ = trigger; }
     Trigger trigger() const { return trigger_; }
 
+    const Parameters& parameters() const { return parameters_; }
+
     void HandleColorEvent(const ImageEvent& event);
     void HandleDepthEvent(const ImageEvent& event);
 
     /// Downstream modules subscribe here for notification when a new keyframe is available.
     /// Processing time should be minimal or move to a separate thread.
     EventListenerList<RgbdFrameEvent> keyframes;
+
+    /// Testing and debugging code can subscribe here to get notified when a video frame has been
+    /// processed.
+    EventListenerList<ProcessedFrameEvent> processed_frames;
 
     void HandleKeyframePoseEvent(const KeyframePoseEvent& event);
 
@@ -199,6 +208,10 @@ private:
 
     // Trigger a key frame event using the current frame and tracking information
     void PostKeyframe();
+
+    // Notify subscribed listeners on processing of a new video frame
+    void PostProcessedFrame(Timestamp timestamp, Status old_state, Status new_state, const SE3d& pose,
+                            size_t num_tracked_features, bool is_keyframe);
 
     // Various configuration prameters
     Parameters parameters_;
@@ -262,6 +275,23 @@ private:
 
     /// Random number generator to use
     std::default_random_engine random_engine_;
+};
+
+/// Representation of a tracking event that the frontend creates upon processing of an
+/// incoming frame.
+///
+/// This is primarily intended for testing and debugging
+struct ProcessedFrameEvent: public Event {
+    RgbdFrontend::Status old_state, new_state;
+
+    // estimated pose for this frame
+    Sophus::SE3d pose;
+
+    // number of tracked features
+    size_t num_tracked_features;
+
+    // is this recorded as keyframe?
+    bool is_keyframe;
 };
 
 } // namespace slammer
