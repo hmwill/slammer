@@ -130,6 +130,6 @@ TEST(FrontendTest, RunFrontend) {
     // 2 secs @ 30 frames/sec, minus 1 frame because the recording doesn't start with a frame at the very beginning
     EXPECT_EQ(listener.num_frames, 59);
 
-    // Pretty high number of keyframes! What's going on?
-    EXPECT_EQ(listener.num_keyframes, 28);
+    // So we stepped through the code convincing ourselves that this result is meaningful
+    EXPECT_EQ(listener.num_keyframes, 7);
 }

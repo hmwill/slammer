@@ -39,6 +39,21 @@ using namespace slammer;
 
 namespace {
 
+// There is no scale for the depth map in the LORIS data set, so we assume the default value:
+// https://dev.intelrealsense.com/docs/projection-in-intel-realsense-sdk-20#section-depth-image-formats
+// The default scale of a Intel RealSense D400 device is one millimeter, allowing for a maximum expressive range of 
+// ~65 meters. The depth scale can be modified by calling rs2_set_option(...) with RS2_OPTION_DEPTH_UNITS, which 
+// specifies the number of meters per one increment of depth. 0.001 would indicate millimeter scale, while 0.01 would 
+// indicate centimeter scale.
+static constexpr double kDepthScale = 0.01;
+
+inline double DepthForPixel(const RgbdFrameData& frame, Point2f point) {
+    float column = point.x, row = point.y; 
+    auto z = kDepthScale * frame.depth.at<ushort>(floorf(row), floorf(column));
+    // 0 depth represents a missing depth value, so we convert those to an NaN value instead
+    return z ? z : std::numeric_limits<double>::signaling_NaN();
+}
+
 template <typename Data, typename Mask>
 size_t Compress(Data& data, const Mask& mask) {
     assert(data.size() == mask.size());
@@ -179,12 +194,12 @@ void RgbdFrontend::ProcessFrame() {
             // if we have enough features, we can attempt to track in the next frame
             if (num_features >= parameters_.num_features_tracking) {
                 PostKeyframe();
+                distance_since_last_keyframe_ = 0;
                 is_keyframe = true;
                 status_ = Status::kTracking;
             } else {
-                // Are we sitting in the dark?
-                // Standing in front of a blank wall?
-                // What's reasonable recovery or behavior?
+                assert(false);
+                abort();
             }
         }
         break;
@@ -202,8 +217,7 @@ void RgbdFrontend::ProcessFrame() {
             std::vector<Point3d> current_coords;
 
             for (const auto& point: current_points) {
-                float column = point.x, row = point.y; 
-                auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));
+                auto z = DepthForPixel(current_frame_data_, point);
                 current_coords.push_back(rgb_camera_.PixelToCamera(point, z));
             }    
 
@@ -231,7 +245,9 @@ void RgbdFrontend::ProcessFrame() {
                 status_ = Status::kNewKeyframe;
             } else {
                 // attempt to improve tracking with additional features
-                DetectAdditionalFeatures();
+                if (num_features < parameters_.num_features_tracking) {
+                    DetectAdditionalFeatures(parameters_.num_features - num_features);
+                }
             }
         }
 
@@ -256,15 +272,14 @@ size_t RgbdFrontend::DetectKeyframeFeatures() {
     cv::KeyPoint::convert(key_points_, tracked_features_);
 
     for (const auto& point: key_points_) {
-        float row = point.pt.y, column = point.pt.x; 
-        auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));
+        auto z = DepthForPixel(current_frame_data_, point.pt);
         tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.pt, z));
     }    
 
     return tracked_features_.size();
 }
 
-size_t RgbdFrontend::DetectAdditionalFeatures() {
+size_t RgbdFrontend::DetectAdditionalFeatures(size_t num_additonal) {
     using std::begin, std::end;
 
     Point2f offset(parameters_.feature_mask_size, parameters_.feature_mask_size);
@@ -277,9 +292,12 @@ size_t RgbdFrontend::DetectAdditionalFeatures() {
     std::vector<cv::KeyPoint> additional_points;
     feature_detector_->detect(current_frame_data_.rgb, additional_points, feature_mask);
 
+    if (additional_points.size() > num_additonal) {
+        additional_points.resize(num_additonal);
+    }
+
     for (const auto& point: additional_points) {
-        float row = point.pt.y, column = point.pt.x; 
-        auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));
+        auto z = DepthForPixel(current_frame_data_, point.pt);
         tracked_features_.push_back(point.pt);
         tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.pt, z));
     }    
@@ -336,12 +354,7 @@ void RgbdFrontend::PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vec
     auto transform = camera_to_robot.inverse() * predicted_pose.inverse() * previous_pose_ * camera_to_robot;
 
     for (const auto& point: tracked_features_) {
-        float row = point.y, column = point.x; 
-        // Question: Just use value from single pixel, or do a weighted average across a small neighborhood?
-        // What is the right rounding mode that's compatible with OpenCV feature and flow calculations?
-        auto z = static_cast<double>(current_frame_data_.depth.at<ushort>(floorf(row), floorf(column)));
-        // Question: Which is the right form to do this?
-        // Point3d image_coord(column * z, row * z, z);
+        auto z = DepthForPixel(current_frame_data_, point);
         auto transformed_point = transform * rgb_camera_.PixelToCamera(point, z);
         points.push_back(rgb_camera_.CameraToPixel(transformed_point));
     }

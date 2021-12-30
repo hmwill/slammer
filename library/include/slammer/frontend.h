@@ -192,7 +192,7 @@ private:
     size_t DetectKeyframeFeatures();
 
     /// Run the feature detector on the RGB data and extract additional keypoints
-    size_t DetectAdditionalFeatures();
+    size_t DetectAdditionalFeatures(size_t num_additonal);
 
     /// Use optical flow to find the key points detected in the previous frame in the current frame
     size_t FindFeaturesInCurrent(std::vector<Point2f>& points);
