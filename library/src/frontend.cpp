@@ -39,19 +39,15 @@ using namespace slammer;
 
 namespace {
 
-// There is no scale for the depth map in the LORIS data set, so we assume the default value:
-// https://dev.intelrealsense.com/docs/projection-in-intel-realsense-sdk-20#section-depth-image-formats
-// The default scale of a Intel RealSense D400 device is one millimeter, allowing for a maximum expressive range of 
-// ~65 meters. The depth scale can be modified by calling rs2_set_option(...) with RS2_OPTION_DEPTH_UNITS, which 
-// specifies the number of meters per one increment of depth. 0.001 would indicate millimeter scale, while 0.01 would 
-// indicate centimeter scale.
-static constexpr double kDepthScale = 0.01;
+// Depth scale used: https://lifelong-robotic-vision.github.io/dataset/scene
+static constexpr double kDepthScale = 0.001;
 
 inline double DepthForPixel(const RgbdFrameData& frame, Point2f point) {
     float column = point.x, row = point.y; 
-    auto z = kDepthScale * frame.depth.at<ushort>(floorf(row), floorf(column));
+    auto depth = frame.depth.at<ushort>(floorf(row), floorf(column));
+
     // 0 depth represents a missing depth value, so we convert those to an NaN value instead
-    return z ? z : std::numeric_limits<double>::signaling_NaN();
+    return depth ? kDepthScale * depth : std::numeric_limits<double>::signaling_NaN();
 }
 
 template <typename Data, typename Mask>
@@ -236,11 +232,11 @@ void RgbdFrontend::ProcessFrame() {
             current_pose_ = relative_motion * previous_pose_;
 
             SE3d motion_since_last_keyframe = current_pose_ * last_keyframe_pose_.inverse();
-            double traveled_distance = sqrt(motion_since_last_keyframe.translation().lpNorm<2>());
-            distance_since_last_keyframe_ += traveled_distance;
+            double distance_since_last_keyframe_ = motion_since_last_keyframe.translation().norm();
 
             if (distance_since_last_keyframe_ >= parameters_.max_keyframe_distance ||
-                num_features < parameters_.num_features_tracking_bad) {
+                num_features < parameters_.num_features_tracking_bad ||
+                now - last_keyframe_timestamp_ > parameters_.max_keyframe_interval) {
                 // need to create a new keyframe in next iteration
                 status_ = Status::kNewKeyframe;
             } else {
@@ -351,7 +347,8 @@ void RgbdFrontend::PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vec
     points.clear();
 
     auto camera_to_robot = rgb_camera_.camera_to_robot();
-    auto transform = camera_to_robot.inverse() * predicted_pose.inverse() * previous_pose_ * camera_to_robot;
+    //auto transform = camera_to_robot.inverse() * predicted_pose.inverse() * previous_pose_ * camera_to_robot;
+    auto transform = predicted_pose * previous_pose_.inverse();
 
     for (const auto& point: tracked_features_) {
         auto z = DepthForPixel(current_frame_data_, point);

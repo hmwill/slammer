@@ -70,8 +70,8 @@ SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vec
     double factor = 1.0 / num_elements;
 
     // Calculate the centroids of the two point clouds
-    auto centroid_reference = std::accumulate(begin(reference), end(reference), Point3d(0.0, 0.0, 0.0)) * factor;
-    auto centroid_transformed = std::accumulate(begin(transformed), end(transformed), Point3d(0.0, 0.0, 0.0)) * factor;
+    Point3d centroid_reference = std::accumulate(begin(reference), end(reference), Point3d(0.0, 0.0, 0.0)) * factor;
+    Point3d centroid_transformed = std::accumulate(begin(transformed), end(transformed), Point3d(0.0, 0.0, 0.0)) * factor;
 
     // Calculate adjusted coordinates for each point cloud, where the centroid has been moved to the origin
     std::vector<Eigen::Vector3d> shifted_reference, shifted_transformed;
@@ -87,7 +87,7 @@ SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vec
     Eigen::Matrix3d W = Eigen::Matrix3d::Zero();
 
     for (size_t index = 0; index < num_elements; ++index) {
-        W += shifted_reference[index] * shifted_transformed[index].transpose();
+        W += shifted_transformed[index] * shifted_reference[index].transpose();
     }
 
     // Compute the SVD
@@ -96,7 +96,7 @@ SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vec
     const auto& V = svd.matrixV();
 
     // Extract the transformation components
-    Eigen::Matrix3d rotation = V * U.transpose();
+    Eigen::Matrix3d rotation = U * V.transpose();
 
     if (rotation.determinant() < 0) {
         rotation = -rotation;
@@ -109,57 +109,78 @@ SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vec
 size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
                           std::default_random_engine& random_engine,
                           SE3d& best_estimate, std::vector<uchar>& inlier_mask,
-                          size_t max_iterations, size_t sample_size, double outlier_factor) {
+                          size_t max_iterations, size_t sample_size, double threshold,
+                          size_t min_additional_inliers) {
     size_t num_points = reference.size();
     assert(transformed.size() == num_points);
 
     inlier_mask.clear();
+    size_t best_num_inliers = 0;
+    double best_variance = std::numeric_limits<double>::max();
+    inlier_mask.resize(num_points, 0);
 
-    if (num_points <= sample_size) {
-        best_estimate = CalculateIcp(reference, transformed);
-        inlier_mask.resize(num_points, std::numeric_limits<uchar>::max());
-        return num_points;
+    if (num_points > sample_size + min_additional_inliers) {
+        std::vector<size_t> indices(num_points);
+        std::vector<uchar> inliers(num_points);
+        std::vector<Point3d> sample_reference, sample_transformed;
+        sample_reference.reserve(sample_size);
+        sample_transformed.reserve(sample_size);
+
+        for (size_t num_iteration = 0; num_iteration < max_iterations; ++num_iteration) {
+            CreateRandomIndices(indices, random_engine);
+            sample_reference.clear();
+            sample_transformed.clear();
+            std::fill(inliers.begin(), inliers.end(), 0);
+
+            for (size_t index = 0; index < sample_size; ++index) {
+                sample_reference.push_back(reference[indices[index]]);
+                sample_transformed.push_back(transformed[indices[index]]);
+                inliers[indices[index]] = std::numeric_limits<uchar>::max();
+            }
+
+            SE3d estimate = CalculateIcp(sample_reference, sample_transformed);
+            size_t num_additonal_inliers = 0;
+
+            for (size_t index = 0; index < num_points; ++index) {
+                if (inliers[index]) {
+                    continue;
+                }
+
+                Point3d diff = transformed[index] - estimate * reference[index];
+                double squared_distance = diff.squaredNorm();
+
+                bool is_inlier = squared_distance < threshold;
+                inliers[index] = is_inlier ? std::numeric_limits<uchar>::max() : 0;
+                num_additonal_inliers += is_inlier;
+            }
+
+            if (num_additonal_inliers >= min_additional_inliers) {
+                sample_reference.clear();
+                sample_transformed.clear();
+
+                for (size_t index = 0; index < num_points; ++index) {
+                    if (inliers[index]) {
+                        sample_reference.push_back(reference[index]);
+                        sample_transformed.push_back(transformed[index]);
+                    }
+                }
+
+                SE3d estimate = CalculateIcp(sample_reference, sample_transformed);
+                double variance = EstimateVariance(sample_reference, sample_transformed, estimate);
+
+                if (variance < best_variance) {
+                    best_variance = variance;
+                    best_num_inliers = num_additonal_inliers + sample_size;
+                    best_estimate = estimate;
+                    inlier_mask = inliers;
+                }
+            }
+        }
     }
 
-    // proper RANSAC starts here
-    size_t best_num_inliers = 0;
-    inlier_mask.resize(num_points, 0);
-    std::vector<size_t> indices(num_points);
-    std::vector<uchar> inliers(num_points);
-    std::vector<Point3d> sample_reference, sample_transformed;
-    sample_reference.reserve(sample_size);
-    sample_transformed.reserve(sample_size);
-
-    for (size_t num_iteration = 0; num_iteration < max_iterations; ++num_iteration) {
-        CreateRandomIndices(indices, random_engine);
-        sample_reference.clear();
-        sample_transformed.clear();
-
-        for (size_t index = 0; index < sample_size; ++index) {
-            sample_reference.push_back(reference[indices[index]]);
-            sample_transformed.push_back(transformed[indices[index]]);
-        }
-
-        SE3d estimate = CalculateIcp(sample_reference, sample_transformed);
-        double variance = EstimateVariance(sample_reference, sample_transformed, estimate);
-
-        size_t num_inliers = 0;
-
-        for (size_t index = 0; index < num_points; ++index) {
-            Point3d diff = transformed[index] - estimate * reference[index];
-            double squared_distance = diff.squaredNorm();
-
-            // TODO: Revisit the outlier check; what is the correct a priori assumption?
-            bool is_inlier = squared_distance < outlier_factor ;//* variance;
-            inliers[index] = is_inlier ? std::numeric_limits<uchar>::max() : 0;
-            num_inliers += is_inlier;
-        }
-
-        if (num_inliers > best_num_inliers) {
-            best_num_inliers = num_inliers;
-            best_estimate = estimate;
-            inlier_mask = inliers;
-        }
+    if (!best_num_inliers) {
+        best_estimate = CalculateIcp(reference, transformed);
+        inlier_mask.resize(num_points, std::numeric_limits<uchar>::max());
     }
 
     return best_num_inliers;

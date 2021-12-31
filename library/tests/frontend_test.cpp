@@ -74,12 +74,23 @@ TEST(FrontendTest, RunFrontend) {
         size_t num_frames, num_keyframes;
         Timestamp min_time, max_time, last_timestamp;
 
+        Point3d groundtruth_position;
+        Quaterniond groundtruth_orientation;
+
+        // as estimated by frontend
+        bool has_last_pose;
+        SE3d last_keyframe_pose;
+
+        // as provided as part of groundtruth
+        Point3d last_keyframe_position;
+        Quaterniond last_keyframe_orientation;
+
         FrontendListener(RgbdFrontend& frontend)
-            : frontend(frontend), num_frames(0), num_keyframes(0),
+            : frontend(frontend), num_frames(0), num_keyframes(0), has_last_pose(false),
                 min_time(Timestamp(Timediff(std::numeric_limits<double>::max()))),
                 max_time(Timestamp(Timediff(std::numeric_limits<double>::min()))) {}
 
-        void HandleEvent(const ProcessedFrameEvent& event) {
+        void HandleFrameEvent(const ProcessedFrameEvent& event) {
             if (num_frames) {
                 EXPECT_GT(event.timestamp, last_timestamp);
                 last_timestamp = event.timestamp;
@@ -115,12 +126,36 @@ TEST(FrontendTest, RunFrontend) {
 
             if (event.is_keyframe) {
                 EXPECT_GE(event.num_tracked_features, frontend.parameters().num_features_tracking);
+
+                if (has_last_pose) {
+                    auto groundtruth_distance = (groundtruth_position - last_keyframe_position).norm();
+                    auto estimated_translation = (event.pose * last_keyframe_pose.inverse()).translation();
+                    auto estimated_distance = estimated_translation.norm();
+
+                    // should be within 90%?
+
+                    auto factor = estimated_distance / groundtruth_distance;
+
+                    EXPECT_GE(factor, 0.9);
+                    EXPECT_LE(factor, 1.1);
+                }
+
+                last_keyframe_pose = event.pose;
+                last_keyframe_position = groundtruth_position;
+                last_keyframe_orientation = groundtruth_orientation;
+                has_last_pose = true;
             }
+        }
+
+        void HandleGroundtruthEvent(const loris::GroundtruthEvent& event) {
+            groundtruth_position = event.position;
+            groundtruth_orientation = event.orientation;
         }
     };
 
     FrontendListener listener(frontend);
-    frontend.processed_frames.AddHandler(std::bind(&FrontendListener::HandleEvent, &listener, _1));
+    frontend.processed_frames.AddHandler(std::bind(&FrontendListener::HandleFrameEvent, &listener, _1));
+    driver.groundtruth.AddHandler(std::bind(&FrontendListener::HandleGroundtruthEvent, &listener, _1));
 
     // run for 2 secs of simulated events
     auto result = driver.Run(slammer::Timediff(2.0));
@@ -131,5 +166,8 @@ TEST(FrontendTest, RunFrontend) {
     EXPECT_EQ(listener.num_frames, 59);
 
     // So we stepped through the code convincing ourselves that this result is meaningful
-    EXPECT_EQ(listener.num_keyframes, 7);
+    EXPECT_EQ(listener.num_keyframes, 4);
+
+    // TODO: Compare estimated distance (which determines the number of keyframes) against provided ground truth
+    // and/or the provided odometer readings. This may not be the same, but should be somewhat close
 }

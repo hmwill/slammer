@@ -63,11 +63,12 @@ SE3d CalculateIcp(const std::vector<Point3d>& reference, const std::vector<Point
 /// \param max_iterations       maximum number of iterations
 /// \param sample_size          number of points to use for each estimate; if the total number of 
 ///                             points is less than this value, the function falls back to `CalculateIcp`.
-/// \param outlier_factor Outlier distance as factor of estimated variance
+/// \param threshold            Threshold value for outlier check
 size_t RobustIcp(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
                  std::default_random_engine& random_engine,
                  SE3d& transformation, std::vector<uchar>& inlier_mask,
-                 size_t max_iterations = 30, size_t sample_size = 10, double outlier_factor = 7.16);
+                 size_t max_iterations = 30, size_t sample_size = 10, double threshold = 7.16,
+                 size_t min_additional_inliers = 20);
 
 } // namespace slammer
 

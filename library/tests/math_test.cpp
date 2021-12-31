@@ -119,10 +119,10 @@ TEST(MathTest, RobustIcp) {
 
     auto num_inliers = RobustIcp(reference, transformed, random_engine,
                                  robust_transformation, estimated_inlier_mask,
-                                 30, 10, 3.0);
+                                 30, 10);
 
     EXPECT_LE((robust_transformation.so3().matrix() - rotation).norm(), 1.0E-2);
-    EXPECT_LE((robust_transformation.translation() - translation).norm(), 0.5);
+    EXPECT_LE((robust_transformation.translation() - translation).norm(), 0.1);
 
     for (size_t index = 0; index < inlier_mask.size(); ++index) {
         EXPECT_LE(inlier_mask[index], estimated_inlier_mask[index]);

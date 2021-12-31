@@ -191,6 +191,42 @@ private:
     EventListenerList<GyroscopeEvent>& listeners_;
 };
 
+class GroundtruthEventSource: public AbstractEventSource {
+public:
+    GroundtruthEventSource(Driver& driver, const std::string& table_name, 
+                         EventListenerList<GroundtruthEvent>& listeners):
+        AbstractEventSource(driver, table_name), listeners_(listeners) {}
+
+    virtual std::optional<Error> Initialize() override {
+        return InitializeCommon(groundtruth_schema);
+    }
+
+    virtual std::optional<Error> FireEvent() override {
+        GroundtruthEvent event {
+            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
+            Vector3d {
+                GetDoubleArrayValue(1, chunk_indices[1], array_indices[1]),
+                GetDoubleArrayValue(2, chunk_indices[2], array_indices[2]),
+                GetDoubleArrayValue(3, chunk_indices[3], array_indices[3])
+            },
+            Quaterniond {
+                GetDoubleArrayValue(1, chunk_indices[4], array_indices[4]),
+                GetDoubleArrayValue(2, chunk_indices[5], array_indices[5]),
+                GetDoubleArrayValue(3, chunk_indices[6], array_indices[6]),
+                GetDoubleArrayValue(3, chunk_indices[7], array_indices[7])
+            }
+        };
+
+        listeners_.HandleEvent(event);
+        --remaining_;
+
+        return std::optional<Error>{};
+    }
+
+private:
+    EventListenerList<GroundtruthEvent>& listeners_;
+};
+
 class ImageEventSource: public AbstractEventSource {
 public:
     ImageEventSource(Driver& driver, const std::string& table_name, 
@@ -266,6 +302,7 @@ Result<size_t> Driver::Run(const std::optional<Timediff> max_duration,
     AddEventSource(std::make_unique<ImageEventSource>(*this, std::string("fisheye2"), fisheye2));
     AddEventSource(std::make_unique<AcceleratorEventSource>(*this, std::string("t265_accelerometer"), t265_accelerometer));
     AddEventSource(std::make_unique<GyroscopeEventSource>(*this, std::string("t265_gyroscope"), t265_gyroscope));
+    AddEventSource(std::make_unique<GroundtruthEventSource>(*this, std::string("groundtruth"), groundtruth));
 
     if (timestamp_heap_.empty()) {
         return 0;

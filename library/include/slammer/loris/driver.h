@@ -52,6 +52,12 @@ struct HeapEntry {
     std::unique_ptr<AbstractEventSource> event_source;
 };
 
+/// Ground truth values
+struct GroundtruthEvent: public Event {
+    Point3d position;
+    Quaterniond orientation;
+};
+
 class Driver {
 public:
     Driver(const std::string& path, arrow::io::IOContext io_context);
@@ -73,6 +79,8 @@ public:
     EventListenerList<GyroscopeEvent> t265_gyroscope;
     EventListenerList<ImageEvent> fisheye1;
     EventListenerList<ImageEvent> fisheye2;
+
+    EventListenerList<GroundtruthEvent> groundtruth;
 
 private:
     std::optional<Error> AddEventSource(std::unique_ptr<AbstractEventSource>&& event_source);

@@ -130,6 +130,9 @@ public:
         // Issue: how to determine units?
         double max_keyframe_distance = 10.0;
 
+        // maximum interval between keyframes
+        Timediff max_keyframe_interval = Timediff(0.5);
+
         // seed value for random number generator
         int seed = 12345;
     };
