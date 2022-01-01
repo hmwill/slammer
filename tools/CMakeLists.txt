@@ -1,2 +1,3 @@
+add_subdirectory(frontend_gui)
 add_subdirectory(slammer_gui)
 add_subdirectory(viewer)

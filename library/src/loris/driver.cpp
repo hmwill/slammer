@@ -210,10 +210,10 @@ public:
                 GetDoubleArrayValue(3, chunk_indices[3], array_indices[3])
             },
             Quaterniond {
-                GetDoubleArrayValue(1, chunk_indices[4], array_indices[4]),
-                GetDoubleArrayValue(2, chunk_indices[5], array_indices[5]),
-                GetDoubleArrayValue(3, chunk_indices[6], array_indices[6]),
-                GetDoubleArrayValue(3, chunk_indices[7], array_indices[7])
+                GetDoubleArrayValue(7, chunk_indices[7], array_indices[7]),
+                GetDoubleArrayValue(4, chunk_indices[4], array_indices[4]),
+                GetDoubleArrayValue(5, chunk_indices[5], array_indices[5]),
+                GetDoubleArrayValue(6, chunk_indices[6], array_indices[6])
             }
         };
 

@@ -80,6 +80,7 @@ struct KeyframePoseEvent;
 
 // forward declaration
 struct ProcessedFrameEvent;
+struct PointCloudAlignmentEvent;
 
 /// Tracking frontend using RGBD camera images
 ///
@@ -117,8 +118,8 @@ public:
         // ICP sample size
         size_t sample_size = 10;
         
-        /// ICP outlier factor
-        double outlier_factor = 7.16;
+        /// ICP outlier threshold
+        double outlier_threshold = 7.16;
 
         int num_features = 200;
         int num_features_init = 100;
@@ -131,10 +132,13 @@ public:
         double max_keyframe_distance = 10.0;
 
         // maximum interval between keyframes
-        Timediff max_keyframe_interval = Timediff(0.5);
+        Timediff max_keyframe_interval = Timediff(1.0);
 
         // seed value for random number generator
         int seed = 12345;
+
+        // number of frames to skip between processing (0 = none)
+        size_t skip_count = 0;
     };
 
     /// How lost are we?
@@ -176,6 +180,10 @@ public:
     /// processed.
     EventListenerList<ProcessedFrameEvent> processed_frames;
 
+    /// Testing and debugging code can subscribe here to get notified when we have aligned the
+    /// point clouds associated with two successive frames
+    EventListenerList<PointCloudAlignmentEvent> point_cloud_alignments;
+
     void HandleKeyframePoseEvent(const KeyframePoseEvent& event);
 
 private:
@@ -215,6 +223,11 @@ private:
     // Notify subscribed listeners on processing of a new video frame
     void PostProcessedFrame(Timestamp timestamp, Status old_state, Status new_state, const SE3d& pose,
                             size_t num_tracked_features, bool is_keyframe);
+
+    // Notify subscribed listeners about the computation of a point cloud alignment
+    void PostPointCloudAlignment(Timestamp timestamp, const SE3d& relative_motion,
+                                 const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
+                                 const std::vector<uchar>& inliers);
 
     // Various configuration prameters
     Parameters parameters_;
@@ -278,6 +291,9 @@ private:
 
     /// Random number generator to use
     std::default_random_engine random_engine_;
+
+    /// downsampling counter
+    size_t skip_count_;
 };
 
 /// Representation of a tracking event that the frontend creates upon processing of an
@@ -295,6 +311,22 @@ struct ProcessedFrameEvent: public Event {
 
     // is this recorded as keyframe?
     bool is_keyframe;
+};
+
+/// Representation of a point cloud alignment that is used to determine the relative
+/// pose between two successive frames
+struct PointCloudAlignmentEvent: public Event {
+    /// estimated relative motion
+    Sophus::SE3d relative_motion;
+
+    /// the reference point cloud
+    std::vector<Point3d> reference;
+
+    /// the transformed point cloud (via relative_motion)
+    std::vector<Point3d> transformed;
+
+    /// the set of inlier points
+    std::vector<bool> inliers;
 };
 
 } // namespace slammer

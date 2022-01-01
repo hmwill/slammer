@@ -64,6 +64,10 @@ TEST(FrontendTest, RunFrontend) {
     Camera depth_camera = CreateCamera(sensor_info.d400_depth_optical_frame, depth_camera_pose.value());
     RgbdFrontend::Parameters frontend_parameters;
 
+    // process only 1 frane/sec
+    frontend_parameters.skip_count = 1;
+    frontend_parameters.max_keyframe_interval = Timediff(1.0);
+
     RgbdFrontend frontend(frontend_parameters, rgb_camera, depth_camera);
 
     driver.color.AddHandler(std::bind(&RgbdFrontend::HandleColorEvent, &frontend, _1));
@@ -128,16 +132,23 @@ TEST(FrontendTest, RunFrontend) {
                 EXPECT_GE(event.num_tracked_features, frontend.parameters().num_features_tracking);
 
                 if (has_last_pose) {
-                    auto groundtruth_distance = (groundtruth_position - last_keyframe_position).norm();
+                    SE3d groundtruth_pose(groundtruth_orientation, groundtruth_position);
+                    SE3d last_goundtruth_pose(last_keyframe_orientation, last_keyframe_position);
+                    auto groundtruth_translation = (groundtruth_pose * last_goundtruth_pose.inverse()).translation();
+                    auto groundtruth_distance = groundtruth_translation.norm();
                     auto estimated_translation = (event.pose * last_keyframe_pose.inverse()).translation();
                     auto estimated_distance = estimated_translation.norm();
 
                     // should be within 90%?
+                    auto diff = estimated_distance - groundtruth_distance;
+                    EXPECT_LE(fabs(diff), 0.1);
 
                     auto factor = estimated_distance / groundtruth_distance;
 
                     EXPECT_GE(factor, 0.9);
                     EXPECT_LE(factor, 1.1);
+
+                    EXPECT_EQ(estimated_distance, groundtruth_distance);
                 }
 
                 last_keyframe_pose = event.pose;
@@ -158,9 +169,9 @@ TEST(FrontendTest, RunFrontend) {
     driver.groundtruth.AddHandler(std::bind(&FrontendListener::HandleGroundtruthEvent, &listener, _1));
 
     // run for 2 secs of simulated events
-    auto result = driver.Run(slammer::Timediff(2.0));
+    auto result = driver.Run(slammer::Timediff(60.0));
     EXPECT_TRUE(result.ok());
-    EXPECT_LE(listener.max_time - listener.min_time, Timediff(2.0));
+    EXPECT_LE(listener.max_time - listener.min_time, Timediff(10.0));
 
     // 2 secs @ 30 frames/sec, minus 1 frame because the recording doesn't start with a frame at the very beginning
     EXPECT_EQ(listener.num_frames, 59);

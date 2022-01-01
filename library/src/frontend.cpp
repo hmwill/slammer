@@ -91,7 +91,7 @@ size_t CompressInto(const Data& input, const Mask& mask, Data& output) {
 RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera), 
       status_(Status::kInitializing), random_engine_(parameters.seed), trigger_(Trigger::kTriggerColor),
-      distance_since_last_keyframe_(0.0) {
+      distance_since_last_keyframe_(0.0), skip_count_(0) {
     feature_detector_ = 
         //cv::GFTTDetector::create(parameters.num_features, parameters.quality_level, parameters.min_distance);
         cv::ORB::create(parameters_.num_features);
@@ -154,6 +154,13 @@ void RgbdFrontend::ProcessFrame() {
     if (current_frame_data_.rgb.empty() || current_frame_data_.depth.empty())
         return;
 
+    if (!skip_count_) {
+        --skip_count_;
+        return;
+    }
+
+    skip_count_ = parameters_.skip_count;
+
     Timestamp now = std::max(current_frame_data_.time_depth, current_frame_data_.time_rgb);
 
     // process any pending keyframe pose updates that the backend may have sent
@@ -212,6 +219,8 @@ void RgbdFrontend::ProcessFrame() {
             size_t num_features = FindFeaturesInCurrent(current_points);
             std::vector<Point3d> current_coords;
 
+            // TODO: num_features < parameters_.num_features_tracking_bad
+
             for (const auto& point: current_points) {
                 auto z = DepthForPixel(current_frame_data_, point);
                 current_coords.push_back(rgb_camera_.PixelToCamera(point, z));
@@ -220,11 +229,13 @@ void RgbdFrontend::ProcessFrame() {
             std::vector<uchar> mask;
 
             num_features = 
-                RobustIcp(tracked_feature_coords_, current_coords,
+                RobustIcp(current_coords, tracked_feature_coords_, 
                           random_engine_, relative_motion, mask,
                           parameters_.max_iterations, parameters_.sample_size, 
-                          parameters_.outlier_factor);
+                          parameters_.outlier_threshold);
 
+            PostPointCloudAlignment(now, relative_motion, tracked_feature_coords_, current_coords, mask);
+            
             CompressInto(current_points, mask, tracked_features_);
             CompressInto(current_coords, mask, tracked_feature_coords_);
 
@@ -371,6 +382,25 @@ void RgbdFrontend::PostProcessedFrame(Timestamp timestamp, Status old_state, Sta
         event.is_keyframe = is_keyframe;
 
         processed_frames.HandleEvent(event);
+    }
+}
+
+void 
+RgbdFrontend::PostPointCloudAlignment(Timestamp timestamp, const SE3d& relative_motion,
+                                      const std::vector<Point3d>& reference, 
+                                      const std::vector<Point3d>& transformed,
+                                      const std::vector<uchar>& inliers) {
+    if (point_cloud_alignments.has_listeners()) {
+        PointCloudAlignmentEvent event;
+
+        event.timestamp = timestamp;
+        event.relative_motion = relative_motion;
+        event.reference = reference;
+        event.transformed = transformed;
+        std::transform(inliers.begin(), inliers.end(), std::back_inserter(event.inliers),
+                       [](uchar ch) { return ch != 0; });
+
+        point_cloud_alignments.HandleEvent(event);
     }
 }
 
