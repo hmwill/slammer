@@ -29,8 +29,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <cstdlib>
-
-#define _USE_MATH_DEFINES // for C++
 #include <cmath>
 
 #include "slammer/slammer.h"
