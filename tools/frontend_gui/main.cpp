@@ -52,6 +52,38 @@ std::vector<cv::Vec3d> EigenToOpenCV(const std::vector<Point3d>& eigen) {
     return result;
 }
 
+std::vector<cv::Vec3d> EigenToOpenCV(const std::vector<Point3d>& eigen, const std::vector<bool>& mask) {
+    std::vector<cv::Vec3d> result;
+
+    for (size_t index = 0; index < eigen.size(); ++index) {
+        if (mask[index]) {
+            const auto& point = eigen[index];
+            result.emplace_back(cv::Vec3d(point.x(), point.y(), point.z()));
+        }
+    }
+
+    return result;
+}
+
+std::vector<cv::Vec3d> EigenToOpenCV(const std::vector<Point3d>& eigen, const SE3d& transformation, const std::vector<bool>& mask) {
+    std::vector<cv::Vec3d> result;
+
+    for (size_t index = 0; index < eigen.size(); ++index) {
+        if (mask[index]) {
+            auto point = transformation * eigen[index];
+            result.emplace_back(cv::Vec3d(point.x(), point.y(), point.z()));
+        }
+    }
+
+    return result;
+}
+
+void KeyboardCallback(const cv::viz::KeyboardEvent &key, void * cookie) {
+    if (key.code == 't') {
+        exit(EXIT_SUCCESS);
+    }
+}
+
 }
 
 void RunPipeline(Timediff duration) {
@@ -88,17 +120,22 @@ void RunPipeline(Timediff duration) {
     driver.aligned_depth.AddHandler(std::bind(&RgbdFrontend::HandleDepthEvent, &frontend, _1));
 
     auto listener = [&](const PointCloudAlignmentEvent& event) {
-        cv::viz::WCloud reference_cloud(EigenToOpenCV(event.reference), cv::viz::Color::blue());
+        cv::viz::WCoordinateSystem coordinate_system;
+
+        cv::viz::WCloud reference_cloud(EigenToOpenCV(event.reference, event.relative_motion, event.inliers), cv::viz::Color::blue());
         reference_cloud.setRenderingProperty(cv::viz::POINT_SIZE, 3.);
 
-        cv::viz::WCloud transformed_cloud(EigenToOpenCV(event.transformed), cv::viz::Color::red());
+        cv::viz::WCloud transformed_cloud(EigenToOpenCV(event.transformed, event.inliers), cv::viz::Color::red());
         transformed_cloud.setRenderingProperty(cv::viz::POINT_SIZE, 3.);
 
         cv::viz::Viz3d visualizer("Viz Window");
         visualizer.setBackgroundColor(cv::viz::Color::white());
 
+        visualizer.showWidget("Coordinates", coordinate_system);
         visualizer.showWidget("Reference", reference_cloud);
         visualizer.showWidget("Transformed", transformed_cloud);
+
+        visualizer.registerKeyboardCallback(KeyboardCallback);
 
         while (!visualizer.wasStopped()) {
             visualizer.spinOnce(/*1, true*/);

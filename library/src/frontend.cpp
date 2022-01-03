@@ -86,6 +86,16 @@ size_t CompressInto(const Data& input, const Mask& mask, Data& output) {
     return num_elements;
 }
 
+void MaskNaN(const std::vector<Point3d>& points, std::vector<uchar>& mask) {
+    for (size_t index = 0; index < points.size(); ++index) {
+        const auto& point = points[index];
+
+        if (isnan(point.x() + point.y() + point.z())) {
+            mask[index] = 0;
+        } 
+    }
+}
+
 }
 
 RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera)
@@ -228,11 +238,20 @@ void RgbdFrontend::ProcessFrame() {
 
             std::vector<uchar> mask;
 
+#if 0
             num_features = 
                 RobustIcp(current_coords, tracked_feature_coords_, 
                           random_engine_, relative_motion, mask,
                           parameters_.max_iterations, parameters_.sample_size, 
                           parameters_.outlier_threshold);
+#else 
+            std::fill_n(std::back_inserter(mask), num_features, std::numeric_limits<uchar>::max());
+            MaskNaN(tracked_feature_coords_, mask);
+            MaskNaN(current_coords, mask);
+
+            relative_motion = OptimizeAlignment(current_coords, tracked_feature_coords_, mask,
+                       rgb_camera_, 0.05, parameters_.max_iterations);
+#endif 
 
             PostPointCloudAlignment(now, relative_motion, tracked_feature_coords_, current_coords, mask);
             

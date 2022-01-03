@@ -65,7 +65,7 @@ TEST(FrontendTest, RunFrontend) {
     RgbdFrontend::Parameters frontend_parameters;
 
     // process only 1 frane/sec
-    frontend_parameters.skip_count = 1;
+    frontend_parameters.skip_count = 5;
     frontend_parameters.max_keyframe_interval = Timediff(1.0);
 
     RgbdFrontend frontend(frontend_parameters, rgb_camera, depth_camera);
