@@ -72,7 +72,7 @@ size_t RobustIcp(const std::vector<Point3d>& reference, const std::vector<Point3
                  size_t min_additional_inliers = 20);
 
 /// Determine an affine transformation that maps the `reference` point set onto the 
-/// `transformed` poiint set, where corresponding points are stored at the same index.
+/// `transformed` point set, where corresponding points are stored at the same index.
 ///
 /// This function calculates ICP using least squares optimization.
 ///

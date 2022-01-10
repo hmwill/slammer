@@ -238,6 +238,7 @@ SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std
     auto transformed_pose = new g2o::VertexSE3();
     transformed_pose->setId(transformed_index);
     transformed_pose->setEstimate(IsometryFromSE3d(SE3d()));
+    transformed_pose->setFixed(false);
     optimizer.addVertex(transformed_pose);
 
     auto camera_parameters = new g2o::ParameterCamera();
@@ -252,7 +253,7 @@ SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std
     information <<
         1.0, 0.0, 0.0, 
         0.0, 1.0, 0.0,
-        0.0, 0.0, 50000.0;
+        0.0, 0.0, 1000.0 * camera.fx() * baseline;
 
     for (size_t index = 0; index < reference.size(); ++index) {
         if (!mask[index]) {
@@ -278,15 +279,15 @@ SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std
         edge->setParameterId(0, 0);
         edge->setRobustKernel(new g2o::RobustKernelHuber());
         auto camera_pt = camera.CameraToPixel(transformed[index]);
-        edge->setMeasurement(Point3d(camera_pt.x - camera.cx(), camera_pt.y - camera.cy(), 1.0/transformed[index].z()));
-        //edge->setMeasurement(transformed[index]);
+        Point3d measurement(camera_pt.x - camera.cx(), camera_pt.y - camera.cy(), 1.0/transformed[index].z());
         optimizer.addEdge(edge);
+        edge->setMeasurement(measurement);
     }
 
     // Perform the actual optimization
     optimizer.setVerbose(false); // while debugging
     optimizer.initializeOptimization();
-    optimizer.optimize(iterations);
+    optimizer.optimize(100 /*iterations*/);
 
     // retrieve results
     auto vertex = dynamic_cast<g2o::VertexSE3 *>(optimizer.vertex(transformed_index));

@@ -37,5 +37,9 @@ include_directories(${SuiteSparse_INCLUDE_DIRS})
 find_package(G2O REQUIRED)
 include_directories(${g2o_INCLUDE_DIRS})
 
+# Incorporating rapidcsv directly because vcpkg/CMake interation non-functioning
+#find_package(rapidcsv REQUIRED)
+include_directories(third-party/rapidcsv)
+
 add_subdirectory(library)
 add_subdirectory(tools)

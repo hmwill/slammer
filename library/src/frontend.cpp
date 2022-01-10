@@ -164,7 +164,7 @@ void RgbdFrontend::ProcessFrame() {
     if (current_frame_data_.rgb.empty() || current_frame_data_.depth.empty())
         return;
 
-    if (!skip_count_) {
+    if (skip_count_) {
         --skip_count_;
         return;
     }

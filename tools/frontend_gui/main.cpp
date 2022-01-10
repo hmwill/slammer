@@ -118,6 +118,7 @@ void RunPipeline(Timediff duration) {
 
     driver.color.AddHandler(std::bind(&RgbdFrontend::HandleColorEvent, &frontend, _1));
     driver.aligned_depth.AddHandler(std::bind(&RgbdFrontend::HandleDepthEvent, &frontend, _1));
+    //driver.depth.AddHandler(std::bind(&RgbdFrontend::HandleDepthEvent, &frontend, _1));
 
     auto listener = [&](const PointCloudAlignmentEvent& event) {
         cv::viz::WCoordinateSystem coordinate_system;
