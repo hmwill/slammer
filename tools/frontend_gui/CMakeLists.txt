@@ -8,7 +8,6 @@ target_include_directories(frontend_gui PUBLIC
 
 target_link_libraries(frontend_gui 
   slammer_lib 
-  arrow_shared 
   ${OpenCV_LIBS} 
   g2o::core g2o::stuff g2o::types_slam3d g2o::solver_cholmod
 )

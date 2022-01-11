@@ -6,6 +6,6 @@ target_include_directories(slammer_gui PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(slammer_gui slammer_lib arrow_shared ${OpenCV_LIBS})
+target_link_libraries(slammer_gui slammer_lib ${OpenCV_LIBS})
 
 add_dependencies(slammer_gui slammer_lib)

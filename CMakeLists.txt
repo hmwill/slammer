@@ -16,9 +16,6 @@ include_directories(${absl_INCLUDE_DIRS})
 find_package(Boost REQUIRED)
 include_directories(${Boost_INCLUDE_DIRS})
 
-find_package(Arrow 5.0 REQUIRED)
-include_directories(${Arrow_INCLUDE_DIRS})
-
 find_package(Eigen3 3.3 REQUIRED)
 include_directories(${Eigen3_INCLUDE_DIRS})
 
@@ -34,7 +31,7 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 find_package(SuiteSparse CONFIG REQUIRED)
 include_directories(${SuiteSparse_INCLUDE_DIRS})
 
-find_package(G2O REQUIRED)
+find_package(g2o REQUIRED)
 include_directories(${g2o_INCLUDE_DIRS})
 
 # Incorporating rapidcsv directly because vcpkg/CMake interation non-functioning

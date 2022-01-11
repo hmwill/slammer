@@ -53,7 +53,7 @@ TEST(FrontendTest, RunFrontend) {
     EXPECT_TRUE(frame_info_result.ok());
     auto frame_info = frame_info_result.value();
 
-    Driver driver(kDataSetPath, arrow::io::default_io_context());
+    Driver driver(kDataSetPath);
 
     auto rgb_camera_pose = GetFramePose(frame_info, "d400_color_optical_frame");
     EXPECT_TRUE(rgb_camera_pose.ok());

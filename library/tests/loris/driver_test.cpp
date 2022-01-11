@@ -80,7 +80,7 @@ private:
 TEST(SlammerLorisTest, DriverTest) {
     using namespace std::placeholders;
 
-    Driver driver("data/cafe1-1", arrow::io::default_io_context());
+    Driver driver("data/cafe1-1");
 
     EventCapture<AccelerometerEvent> d400_accelerometer(10, 20);
     driver.d400_accelerometer.AddHandler(std::bind(&EventCapture<AccelerometerEvent>::Callback, &d400_accelerometer, _1));

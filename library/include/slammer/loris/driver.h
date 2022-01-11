@@ -38,8 +38,7 @@
 
 #include <optional>
 
-#include "arrow/io/api.h"
-
+#include "rapidcsv.h"
 
 namespace slammer {
 namespace loris {
@@ -60,14 +59,13 @@ struct GroundtruthEvent: public Event {
 
 class Driver {
 public:
-    Driver(const std::string& path, arrow::io::IOContext io_context);
+    Driver(const std::string& path);
     ~Driver();
 
     Result<size_t> Run(const std::optional<Timediff> max_duration = {}, 
                        const std::optional<size_t> max_num_events = {});
 
     const std::string& path() const { return path_; }
-    arrow::io::IOContext io_context() const { return io_context_; }
 
     EventListenerList<AccelerometerEvent> d400_accelerometer;
     EventListenerList<GyroscopeEvent> d400_gyroscope;
@@ -87,7 +85,6 @@ private:
 
     std::string path_;
     std::vector<HeapEntry> timestamp_heap_;
-    arrow::io::IOContext io_context_;
 };
 
 } // namespace loris

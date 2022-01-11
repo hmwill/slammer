@@ -29,8 +29,6 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "slammer/loris/driver.h"
-#include "slammer/loris/arrow_utils.h"
-#include "slammer/loris/schema.h"
 
 #include <array>
 #include <limits>
@@ -54,8 +52,8 @@ namespace loris {
 /// time axis.
 class AbstractEventSource {
 public:
-    AbstractEventSource(Driver& driver, const std::string& table_name):
-        driver_(driver), table_name_(table_name) {}
+    AbstractEventSource(Driver& driver, const std::string& table_name, bool has_header):
+        driver_(driver), table_name_(table_name), has_header_(has_header), row_index_(0) {}
 
     /// Initialize the event source
     virtual std::optional<Error> Initialize() = 0;
@@ -64,100 +62,79 @@ public:
     virtual std::optional<Error> FireEvent() = 0;
 
     std::optional<Timestamp> NextEventTime() const {
-        if (!remaining_) {
+        if (row_index_ >= timestamp_column_.size()) {
             return std::optional<Timestamp>{};
         }
 
-        auto chunk = columns_[0]->chunk(chunk_indices[0]);
-        auto double_array = dynamic_cast<arrow::NumericArray<arrow::DoubleType> *>(chunk.get());
-
-        return Timestamp { Timediff {  double_array->Value(array_indices[0]) } };
-    }
-
-    double GetDoubleArrayValue(int column_index, int& chunk_index, int& array_index) {
-        auto array = 
-            dynamic_cast<arrow::NumericArray<arrow::DoubleType> *>(columns_[column_index]->chunk(chunk_index).get());
-        auto result = array->Value(array_indices[0]);
-
-        if (++array_index >= array->length()) {
-            array_index = 0;
-            ++chunk_index;
-        }
-
-        return result;
-    }
-
-    Timestamp GetTimestampArrayValue(int column_index, int& chunk_index, int& array_index) {
-        return Timestamp { Timediff { GetDoubleArrayValue(column_index, chunk_index, array_index) } };
-    }
-
-    std::string GetStringArrayValue(int column_index, int& chunk_index, int& array_index) {
-        auto array = 
-            dynamic_cast<arrow::BinaryArray *>(columns_[column_index]->chunk(chunk_index).get());
-        auto result = array->GetString(array_indices[0]);
-
-        if (++array_index >= array->length()) {
-            array_index = 0;
-            ++chunk_index;
-        }
-
-        return result;
+        return Timestamp { Timediff {  timestamp_column_[row_index_] } };
     }
 
 protected:
-    std::optional<Error> InitializeCommon(const SchemaPointer& schema) {
+    std::optional<Error> InitializeCommon() {
         std::string full_path = driver_.path() + "/" + table_name_ + ".txt";
-        auto maybe_table = ReadLorisTable(full_path, schema, driver_.io_context());
 
-        if (maybe_table.ok()) {
-            auto table = maybe_table.value();
-            remaining_ = table->num_rows();
-            columns_ = table->columns();
-            chunk_indices.resize(columns_.size());
-            array_indices.resize(columns_.size());
-        } else {
-            return maybe_table.error();
+        try {
+            document_.Load(full_path, rapidcsv::LabelParams(-1, -1),
+                           rapidcsv::SeparatorParams(' '), rapidcsv::ConverterParams(),
+                           rapidcsv::LineReaderParams(true, '#'));
+            timestamp_column_ = document_.GetColumn<double>(0);
+        } catch (std::exception exc) {
+            std::string message = "Error opening file '" + full_path + "'";
+            return Error(message);
         }
 
         return std::optional<Error>{};
     }
 
+    void NextRow() {
+        ++row_index_;
+    }
+
     Driver& driver_;
     std::string table_name_;
-    size_t remaining_;
-    std::vector<std::shared_ptr<arrow::ChunkedArray>> columns_;
-    std::vector<int> chunk_indices;
-    std::vector<int> array_indices;
+    bool has_header_;
+
+    size_t row_index_;
+    rapidcsv::Document document_;
+    std::vector<double> timestamp_column_;
 };
 
 class AcceleratorEventSource: public AbstractEventSource {
 public:
     AcceleratorEventSource(Driver& driver, const std::string& table_name, 
                            EventListenerList<AccelerometerEvent>& listeners):
-        AbstractEventSource(driver, table_name), listeners_(listeners) {}
+        AbstractEventSource(driver, table_name, true), listeners_(listeners) {}
 
     virtual std::optional<Error> Initialize() override {
-        return InitializeCommon(accelerometer_schema);
+        auto result = InitializeCommon();
+
+        if (!result.has_value()) {
+            ax_ = document_.GetColumn<double>(1);
+            ay_ = document_.GetColumn<double>(2);
+            az_ = document_.GetColumn<double>(3);
+        }
+
+        return result;
     }
 
     virtual std::optional<Error> FireEvent() override {
         AccelerometerEvent event {
-            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
+            Timestamp { Timediff {  timestamp_column_[row_index_] } },
             Vector3d {
-                GetDoubleArrayValue(1, chunk_indices[1], array_indices[1]),
-                GetDoubleArrayValue(2, chunk_indices[2], array_indices[2]),
-                GetDoubleArrayValue(3, chunk_indices[3], array_indices[3])
+                ax_[row_index_],
+                ay_[row_index_],
+                az_[row_index_]
             }
         };
 
         listeners_.HandleEvent(event);
-        --remaining_;
+        NextRow();
 
         return std::optional<Error>{};
     }
 
 private:
-
+    std::vector<double> ax_, ay_, az_;
     EventListenerList<AccelerometerEvent>& listeners_;
 };
 
@@ -165,29 +142,38 @@ class GyroscopeEventSource: public AbstractEventSource {
 public:
     GyroscopeEventSource(Driver& driver, const std::string& table_name, 
                          EventListenerList<GyroscopeEvent>& listeners):
-        AbstractEventSource(driver, table_name), listeners_(listeners) {}
+        AbstractEventSource(driver, table_name, true), listeners_(listeners) {}
 
     virtual std::optional<Error> Initialize() override {
-        return InitializeCommon(gyroscope_schema);
+        auto result = InitializeCommon();
+
+        if (!result.has_value()) {
+            gx_ = document_.GetColumn<double>(1);
+            gy_ = document_.GetColumn<double>(2);
+            gz_ = document_.GetColumn<double>(3);
+        }
+
+        return result;
     }
 
     virtual std::optional<Error> FireEvent() override {
         GyroscopeEvent event {
-            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
+            Timestamp { Timediff {  timestamp_column_[row_index_] } },
             Vector3d {
-                GetDoubleArrayValue(1, chunk_indices[1], array_indices[1]),
-                GetDoubleArrayValue(2, chunk_indices[2], array_indices[2]),
-                GetDoubleArrayValue(3, chunk_indices[3], array_indices[3])
+                gx_[row_index_],
+                gy_[row_index_],
+                gz_[row_index_]
             }
         };
 
         listeners_.HandleEvent(event);
-        --remaining_;
+        NextRow();
 
         return std::optional<Error>{};
     }
 
 private:
+    std::vector<double> gx_, gy_, gz_;
     EventListenerList<GyroscopeEvent>& listeners_;
 };
 
@@ -195,35 +181,49 @@ class GroundtruthEventSource: public AbstractEventSource {
 public:
     GroundtruthEventSource(Driver& driver, const std::string& table_name, 
                          EventListenerList<GroundtruthEvent>& listeners):
-        AbstractEventSource(driver, table_name), listeners_(listeners) {}
+        AbstractEventSource(driver, table_name, true), listeners_(listeners) {}
 
     virtual std::optional<Error> Initialize() override {
-        return InitializeCommon(groundtruth_schema);
+        auto result = InitializeCommon();
+
+        if (!result.has_value()) {
+            px_ = document_.GetColumn<double>(1);
+            py_ = document_.GetColumn<double>(2);
+            pz_ = document_.GetColumn<double>(3);
+            qx_ = document_.GetColumn<double>(4);
+            qy_ = document_.GetColumn<double>(5);
+            qz_ = document_.GetColumn<double>(6);
+            qw_ = document_.GetColumn<double>(7);
+        }
+
+        return result;
     }
 
     virtual std::optional<Error> FireEvent() override {
         GroundtruthEvent event {
-            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
+            Timestamp { Timediff {  timestamp_column_[row_index_] } },
             Vector3d {
-                GetDoubleArrayValue(1, chunk_indices[1], array_indices[1]),
-                GetDoubleArrayValue(2, chunk_indices[2], array_indices[2]),
-                GetDoubleArrayValue(3, chunk_indices[3], array_indices[3])
+                px_[row_index_],
+                py_[row_index_],
+                pz_[row_index_]
             },
             Quaterniond {
-                GetDoubleArrayValue(7, chunk_indices[7], array_indices[7]),
-                GetDoubleArrayValue(4, chunk_indices[4], array_indices[4]),
-                GetDoubleArrayValue(5, chunk_indices[5], array_indices[5]),
-                GetDoubleArrayValue(6, chunk_indices[6], array_indices[6])
+                qw_[row_index_],
+                qx_[row_index_],
+                qy_[row_index_],
+                qz_[row_index_]
             }
         };
 
         listeners_.HandleEvent(event);
-        --remaining_;
+        NextRow();
 
         return std::optional<Error>{};
     }
 
 private:
+    std::vector<double> px_, py_, pz_;
+    std::vector<double> qx_, qy_, qz_, qw_;
     EventListenerList<GroundtruthEvent>& listeners_;
 };
 
@@ -231,14 +231,20 @@ class ImageEventSource: public AbstractEventSource {
 public:
     ImageEventSource(Driver& driver, const std::string& table_name, 
                      EventListenerList<ImageEvent>& listeners):
-        AbstractEventSource(driver, table_name), listeners_(listeners) {}
+        AbstractEventSource(driver, table_name, false), listeners_(listeners) {}
 
     virtual std::optional<Error> Initialize() override {
-        return InitializeCommon(image_schema);
+        auto result = InitializeCommon();
+
+        if (!result.has_value()) {
+            path_ = document_.GetColumn<std::string>(1);
+        }
+
+        return result;
     }
 
     virtual std::optional<Error> FireEvent() override {
-        auto image_name = GetStringArrayValue(1, chunk_indices[1], array_indices[1]);
+        const auto& image_name = path_[row_index_];
         std::string full_path = driver_.path() + "/" + image_name;
         auto image = cv::imread(full_path, cv::IMREAD_UNCHANGED);
 
@@ -248,17 +254,18 @@ public:
         }
 
         ImageEvent event {
-            GetTimestampArrayValue(0, chunk_indices[0], array_indices[0]),
+            Timestamp { Timediff {  timestamp_column_[row_index_] } },
             image
         };
 
         listeners_.HandleEvent(event);
-        --remaining_;
+        NextRow();
 
         return std::optional<Error>{};
     }
 
 private:
+    std::vector<std::string> path_;
     EventListenerList<ImageEvent>& listeners_;
 };
 
@@ -266,9 +273,8 @@ private:
 } // namespace slammer
 
 
-Driver::Driver(const std::string& path, arrow::io::IOContext io_context):
-    path_(path), io_context_(io_context)
-{ }
+Driver::Driver(const std::string& path)
+    : path_(path) { }
 
 Driver::~Driver() {
 

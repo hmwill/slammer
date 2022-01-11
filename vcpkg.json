@@ -3,12 +3,15 @@
     "version-string": "0.0.0",
     "dependencies": [
       "abseil",
-      "arrow",
       "boost",
       "eigen3",
       "g2o",
       "gtest",
-      "opencv",
+      {
+        "name": "opencv",
+        "default-features": true,
+        "features": [ "vtk" ]
+      },
       "pangolin",
       "suitesparse",
       "sophus"

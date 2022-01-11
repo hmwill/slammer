@@ -5,7 +5,7 @@ add_library(slammer_lib
   src/math.cpp
   src/keyframe_index.cpp
   src/orb.cpp
-  src/loris/arrow_utils.cpp src/loris/driver.cpp src/loris/opencv_utils.cpp src/loris/schema.cpp
+  src/loris/driver.cpp src/loris/opencv_utils.cpp
 )
 
 
@@ -25,13 +25,13 @@ add_executable(test_slammer_lib
   tests/math_test.cpp
   tests/keyframe_index_test.cpp
   tests/orb_test.cpp
-  tests/loris/arrow_utils_test.cpp tests/loris/driver_test.cpp tests/loris/opencv_utils_test.cpp
+  tests/loris/driver_test.cpp tests/loris/opencv_utils_test.cpp
 )
 
 add_dependencies(test_slammer_lib slammer_lib)
 
 target_link_libraries(test_slammer_lib 
-  slammer_lib arrow_shared ${OpenCV_LIBS} GTest::gtest GTest::gtest_main
+  slammer_lib ${OpenCV_LIBS} GTest::gtest GTest::gtest_main
   ${Boost_LIBRARIES}
   g2o::core g2o::stuff g2o::types_slam3d g2o::solver_cholmod
   Eigen3::Eigen

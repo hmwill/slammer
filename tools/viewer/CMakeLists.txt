@@ -6,6 +6,6 @@ target_include_directories(viewer PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(viewer slammer_lib arrow_shared ${OpenCV_LIBS})
+target_link_libraries(viewer slammer_lib ${OpenCV_LIBS})
 
 add_dependencies(viewer slammer_lib)
