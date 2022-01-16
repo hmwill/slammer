@@ -37,5 +37,5 @@
 using namespace slammer;
 
 TEST(OrbTest, Basic) {
-    OrbFeatureDetector detector;
+    //OrbFeatureDetector detector;
 }

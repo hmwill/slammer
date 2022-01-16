@@ -35,14 +35,54 @@
 
 #include "slammer/slammer.h"
 
+#include <boost/gil.hpp>
+
 namespace slammer {
 
-class OrbFeatureDetector {
-public:
+/// This namespace provides an implementation of ORB feature detection and matching.
+/// It is written against the Boost Generic Image Library (https://github.com/boostorg/gil).
+/// Initially, we are formulating the algorithms in a rather concrete form, but may
+/// consider turning them into more generic versions lateron.
+namespace orb {
 
-private:
+/// Descriptor of an ORB feature
+///
+/// Overall, this structure utilizes 384 bits (48 bytes)
+struct Descriptor {
+    /// The decriptor is calculated using pixels within a circle with the following radius
+    static constexpr int kRadius = 13;
+
+    /// Number of sample pairs used to calculate the descriptor. This corresponds to the number
+    /// of descriptor bits.
+    static constexpr size_t kNumSamples = 256;
+
+    using Bits = std::bitset<kNumSamples>;
+
+    /// the image coordinate
+    Point2f coords;
+
+    /// the angle of the feature
+    float angle;
+
+    /// the level within the image pyramid
+    uint32_t level;
+
+    /// the bit pattern identiyfing the feature
+    Bits descriptor_;
 };
 
+} // namespace orb
 } // namespace slammer
 
 #endif //ndef SLAMMER_ORB_H
+
+/* 
+TODO:
+
+- Build image pyramid
+- Detect corners
+- Determine level and rotation
+- Calculate descriptor bit masks
+- Pairwise matching of features
+
+*/

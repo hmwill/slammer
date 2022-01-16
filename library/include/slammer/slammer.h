@@ -75,8 +75,11 @@ using Timediff = std::chrono::duration<double>;
 /// Representation of absolute time (in seconds, relative to standard OS epoch)
 using Timestamp = std::chrono::time_point<std::chrono::system_clock, Timediff>;
 
-/// 2-d coordinates used to address pixels in images
+/// 2-d coordinates used to address locations in images
 using Point2f = cv::Point2f;
+
+/// 2-d coordinates used to address pixels in images
+using Point2i = cv::Point2i;
 
 /// 3-d vector type
 using Vector3d = Eigen::Vector3d;
