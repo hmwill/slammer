@@ -30,70 +30,17 @@
 
 #include "slammer/orb.h"
 
+#include "slammer/utility.h"
+
+#include <boost/gil/extension/numeric/sampler.hpp>
+#include <boost/gil/extension/numeric/resample.hpp>
+
 using namespace slammer;
 using namespace slammer::orb;
 
 using namespace boost::gil;
 
 namespace {
-
-/// Calculate the pixel values of the output image by downasmpling the input image.
-///
-/// \param in   the input imageto down sample
-/// \param out  the output image to be computed
-void DownSample(const gray8c_view_t& in, gray8_view_t& out) {
-    if (in.dimensions() == out.dimensions()) {
-        // TODO: Special case for same size, where we just copy the images
-    }
-
-    assert(out.width() <= in.width());
-    assert(out.height() <= in.height());
-
-    // TODO: Replace mixed floating point and integer computation by fixed precision,
-    // such as 16-bit fractions per pixel
-    float scale_x = static_cast<float>(in.width()) / static_cast<float>(out.width());
-    float scale_y = static_cast<float>(in.height()) / static_cast<float>(out.height());
-
-    float inv_area = 1.0 / scale_x * scale_y;
-
-    int window_x = ceilf(scale_x);
-    int window_y = ceilf(scale_y);
-
-    for (gray8_view_t::y_coord_t y = 0; y < out.height(); ++y) {
-        gray8c_view_t::y_coord_t y_min = floorf(y * scale_y);
-        gray8c_view_t::y_coord_t y_max = y_min + window_y - 1;
-        float factor_y_min = ceilf(y * scale_y) - y * scale_y;
-        float factor_y_max = ceilf((y + 1) * scale_y) - (y + 1) * scale_y;
-
-        for (gray8_view_t::x_coord_t x = 0; x < out.width(); ++x) {
-            gray8c_view_t::y_coord_t x_min = floorf(x * scale_x);
-            gray8c_view_t::y_coord_t x_max = x_min + window_x - 1;
-            float factor_x_min = ceilf(x * scale_x) - x * scale_x;
-            float factor_x_max = ceilf((x + 1) * scale_x) - (x + 1) * scale_x;
-
-            float sum = 0.0f;
-
-            sum += factor_x_min * factor_y_min * in(x_min, y_min);
-            sum += factor_x_max * factor_y_min * in(x_max, y_min);
-            sum += factor_x_min * factor_y_max * in(x_min, y_max);
-            sum += factor_x_max * factor_y_max * in(x_max, y_max);
-
-            for (gray8_view_t::x_coord_t index_x = x_min + 1; index_x < x_max; ++index_x) {
-                sum += factor_y_min * in(index_x, y_min);
-                sum += factor_y_max * in(index_x, y_max);
-            }
-
-            // TODO: Special case for scale is between 0.5 and 1.0, where we do not need this block
-            for (gray8_view_t::y_coord_t index_y = y_min + 1; index_y < y_max; ++index_y) {
-                for (gray8_view_t::x_coord_t index_x = x_min + 1; index_x < x_max; ++index_x) {
-                    sum += in(index_x, index_y);
-                }
-            }
-
-            out(x, y) = static_cast<gray8_view_t::value_type>(sum * inv_area);
-        }
-    }
-}
 
 /// Create an image pyramid for the provided image.
 ///
@@ -108,43 +55,63 @@ std::vector<gray8_image_t> CreatePyramid(gray8_image_t&& level_0, float scale, u
     result.emplace_back(std::move(level_0));
 
     for (unsigned level = 0; level < num_levels; ++level) {
-        auto& image = result[level];
-        auto width = image.width() * scale;
-        auto height = image.height() * scale;
-        auto dimensions = point_t(width, height);
+        const auto& image = result[level];
+        auto dimensions = point_t(image.width() * scale, image.height() * scale);
 
         gray8_image_t new_image(dimensions);
-        auto view_in = const_view(image);
-        auto view_out = view(new_image);
-        DownSample(view_in, view_out);
-
+        boost::gil::resize_view(const_view(image), view(new_image), boost::gil::bilinear_sampler{});
         result.emplace_back(std::move(new_image));
     }
 
     return result;
 }
 
-/// Left-rotation of a 16-bit bit pattern
-inline uint16_t RotateLeft(uint16_t value, unsigned shift) {
-    return ((value << shift) | (value >> (16 - shift))) & std::numeric_limits<uint16_t>::max();
+/// Test if the 16-bit word has 12 consecutive bits set to true
+inline bool Has12ConsecutiveBits(uint16_t value) {
+    static constexpr uint16_t kLower4  = 0x000F;
+    static constexpr uint16_t kUpper12 = 0xFFF0;
+
+    if ((value & kUpper12) == kUpper12) {
+        return true;
+    }  
+
+    // TODO: use std::countl_one/std::countr_one from C++20 (versus using look-up table)
+    const uint8_t leading_ones[16] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 4
+    };
+
+    const uint8_t trailing_ones[16] = {
+        0, 1, 0, 2, 0, 1, 0, 3, 0, 1, 0, 2, 0, 1, 0, 4
+    };
+
+    auto leading = leading_ones[value & kLower4];
+    auto trailing = trailing_ones[value & kLower4];
+
+    return leading && RotateLeft(value, leading) == kUpper12 ||
+        trailing && RotateRight(value, trailing) == kUpper12;
 }
+
+struct FastFeature {
+    Point2i coord;
+    uint8_t center;
+    std::array<uint8_t, 16> circle;
+};
 
 /// Detect FAST features in the given image and return a collection of feature point coordinates.
 ///
-/// \param image The image bitmap where we are looking for FAST features. This needs to be a
-///                 single channel gray-scale image.
+/// \param image        The image bitmap where we are looking for FAST features. This needs to be a
+///                      single channel gray-scale image.
 /// \param threshold    The intensity threshold to apply in the detection process
-inline std::vector<Point2i> DetectFastFeatures(const gray8c_view_t& image, float threshold) {
-    static constexpr uint16_t kLower12 = (1u << 12) - 1;
+/// \param border       The width of border around the image where we should not detect features
+inline std::vector<FastFeature> DetectFastFeatures(const gray8c_view_t& image, uint8_t threshold, unsigned border) {
+    std::vector<FastFeature> result;
 
-    std::vector<Point2i> result;
-
-    if (image.width() <= Descriptor::kRadius || image.height() <= Descriptor::kRadius) {
+    if (image.width() <= 2* border || image.height() <= 2* border) {
         return result;
     }
 
-    gray8c_view_t::xy_locator center = image.xy_at(Descriptor::kRadius, Descriptor::kRadius);
-    gray8c_view_t::xy_locator::cached_location_t locations[16]  = {
+    gray8c_view_t::xy_locator center = image.xy_at(border, border);
+    gray8c_view_t::xy_locator::cached_location_t locations[16] = {
         center.cache_location(0,-3),
         center.cache_location(1,-3),
         center.cache_location(2,-2),
@@ -163,47 +130,43 @@ inline std::vector<Point2i> DetectFastFeatures(const gray8c_view_t& image, float
         center.cache_location(-1,-3)
     };
 
-    for (int y = Descriptor::kRadius; y < image.height() - 2 * Descriptor::kRadius - 1; ++y) {
-        for (int x = Descriptor::kRadius; x < image.width() - 2 * Descriptor::kRadius - 1; ++x) {
-            auto reference = *center;
+    constexpr uint8_t kMaxValue = std::numeric_limits<uint8_t>::max();
+    FastFeature feature;
+
+    for (int y = border; y < image.height() - border - 1; ++y) {
+        feature.coord.y = y;
+
+        for (int x = border; x < image.width() - border - 1; ++x) {
+            feature.coord.x = x;
+            int reference = feature.center = *center;
 
             uint16_t above = 0, below = 0;
-            constexpr auto kMaxValue = std::numeric_limits<decltype(reference)>::max();
+            int upper = reference + static_cast<int>(threshold);
+            int lower = reference - static_cast<int>(threshold);
 
             // TODO: Should run benchmark to see if it is worth implementing the simplified
             // elimination test involving 2/4 points at 180/90 degree angle
-            if (reference >= threshold) {
-                for (unsigned index = 0, mask = 1; index < 16; ++index, mask <<= 1) {
-                    auto value = center[locations[index]];
-                    below |= mask * (value <= reference - threshold);
-                }
+            for (unsigned index = 0, mask = 1; index < 16; ++index, mask <<= 1) {
+                int value = center[locations[index]];
+                feature.circle[index] = value;
+
+                above |= mask * (value >= upper);
+                below |= mask * (value <= lower);
             }
 
-            if (below & kLower12 == kLower12 ||
-                RotateLeft(below, 1) & kLower12 == kLower12 ||
-                RotateLeft(below, 2) & kLower12 == kLower12 ||
-                RotateLeft(below, 3) & kLower12 == kLower12 ||
-                RotateLeft(below, 4) & kLower12 == kLower12) {
-                result.emplace_back(x, y);
-            } else if (reference <= kMaxValue - threshold) {
-                for (unsigned index = 0, mask = 1; index < 16; ++index, mask <<= 1) {
-                    auto value = center[locations[index]];
-                    above |= mask * (value >= reference + threshold);
-                }
 
-                if (above & kLower12 == kLower12 ||
-                    RotateLeft(above, 1) & kLower12 == kLower12 ||
-                    RotateLeft(above, 2) & kLower12 == kLower12 ||
-                    RotateLeft(above, 3) & kLower12 == kLower12 ||
-                    RotateLeft(above, 4) & kLower12 == kLower12) {
-                    result.emplace_back(x, y);
-                }
+            if (Has12ConsecutiveBits(below)) {
+                assert(__popcnt16(below) >= 12);
+                result.emplace_back(feature);
+            } else if (Has12ConsecutiveBits(above)) {
+                assert(__popcnt16(above) >= 12);
+                result.emplace_back(feature);
             }
 
             ++center.x();
         }
 
-        center += point<std::ptrdiff_t>(2 * Descriptor::kRadius - image.width(), 1);
+        center += point<std::ptrdiff_t>(-image.width() + 2 * border + 1, 1);
     }
 
     return result;
@@ -219,12 +182,7 @@ inline std::vector<Point2i> DetectFastFeatures(const gray8c_view_t& image, float
 inline float CalculateOrientation(const gray8c_view_t& image, Point2i coords, int delta) {
     assert(delta > 0);
 
-    // obtain the feature center; we use floor as rounding mode because any
-    // point within a pixel square should be mapped to the pixel itself
-    ptrdiff_t integer_x = static_cast<ptrdiff_t>(floorf(coords.x));
-    ptrdiff_t integer_y = static_cast<ptrdiff_t>(floorf(coords.y));
-
-    gray8c_view_t::xy_locator center = image.xy_at(integer_x, integer_y);
+    gray8c_view_t::xy_locator center = image.xy_at(coords.x, coords.y);
     float m00 = 0.0f, m10 = 0.0f, m01 = 0.0f;
 
     for (int delta_y = -delta; delta_y <= delta; ++delta_y) {
@@ -332,6 +290,9 @@ const struct {
     {{7, 3}, {12, 4}},      {{9, -7}, {10, -2}},     {{7, 0}, {12, -2}},
     {{-1, -6}, {0, -11}}};
 
+/// the maximum absolute value of sample coordinates
+const int8_t kMaxSampleCoordinate = 13;
+
 /// Calculate the rotated BRIEF descriptor bit pattern for the feature at the givven coordinates and orientation
 /// within the image bitmap.
 ///
@@ -343,37 +304,22 @@ const struct {
 inline Descriptor::Bits ComputeDescriptor(const gray8c_view_t& image, Point2i coords, float angle) {
     Descriptor::Bits result;
 
-    // obtain the feature center; we use floor as rounding mode because any
-    // point within a pixel square should be mapped to the pixel itself
-    ptrdiff_t integer_x = static_cast<ptrdiff_t>(floorf(coords.x));
-    ptrdiff_t integer_y = static_cast<ptrdiff_t>(floorf(coords.y));
-
-    // If the feature center is too close to the image boundary to allow for accessing the 
-    // required pixels, return an empty descriptor
-    if (integer_x < Descriptor::kRadius || integer_x + Descriptor::kRadius >= image.width() ||
-        integer_y < Descriptor::kRadius || integer_y + Descriptor::kRadius >= image.height()) {
-        return result;
-    }
-
-    gray8c_view_t::xy_locator center = image.xy_at(integer_x, integer_y);
-
+    gray8c_view_t::xy_locator center = image.xy_at(coords.x, coords.y);
     float cos = cosf(angle), sin = sinf(angle);
 
     for (unsigned index = 0; index < Descriptor::kNumSamples; ++index) {
-        // we are using round nearest because the center is represented by the
-        // pixel center (at 1/2 pixel offset)
         ptrdiff_t first_x = 
-            static_cast<ptrdiff_t>(roundf(kSampleCoordinates[index].s0.x * cos - 
+            static_cast<ptrdiff_t>(floorf(kSampleCoordinates[index].s0.x * cos - 
                                           kSampleCoordinates[index].s0.y * sin));
         ptrdiff_t first_y = 
-            static_cast<ptrdiff_t>(roundf(kSampleCoordinates[index].s0.x * sin + 
+            static_cast<ptrdiff_t>(floorf(kSampleCoordinates[index].s0.x * sin + 
                                           kSampleCoordinates[index].s0.y * cos));
                                           
         ptrdiff_t second_x = 
-            static_cast<ptrdiff_t>(roundf(kSampleCoordinates[index].s1.x * cos - 
+            static_cast<ptrdiff_t>(floorf(kSampleCoordinates[index].s1.x * cos - 
                                           kSampleCoordinates[index].s1.y * sin));
         ptrdiff_t second_y = 
-            static_cast<ptrdiff_t>(roundf(kSampleCoordinates[index].s1.x * sin + 
+            static_cast<ptrdiff_t>(floorf(kSampleCoordinates[index].s1.x * sin + 
                                           kSampleCoordinates[index].s1.y * cos));
 
         result[index] = center(first_x, first_y) < center(second_x, second_y);
@@ -382,17 +328,6 @@ inline Descriptor::Bits ComputeDescriptor(const gray8c_view_t& image, Point2i co
     return result;
 }
 
-/// The kernels to use for computing the Harris scores
-struct HarrisKernels {
-    /// The kernel to use for calculating the gradient in x direction 
-    boost::gil::detail::kernel_2d<float> dx;
-
-    /// The kernel to use for calculating the gradient in y direction
-    boost::gil::detail::kernel_2d<float> dy;
-
-    /// The smoothing kernel to use for aggregating across tensor values
-    boost::gil::detail::kernel_2d<float> smoothing;
-};
 
 /// Create the kernels that we need
 ///
@@ -421,8 +356,8 @@ inline float Sample(const gray8c_view_t& image, Point2i coords,
     const auto& center_x = kernel.center_x();
     const auto& center_y = kernel.center_x();
 
-    for (int y = -kernel.lower_size(); y <= kernel.upper_size(); ++y) {
-        for (int x = -kernel.left_size(); x <= kernel.upper_size(); ++x) {
+    for (int y = -kernel.lower_size(); y <= (int) kernel.upper_size(); ++y) {
+        for (int x = -kernel.left_size(); x <= (int) kernel.upper_size(); ++x) {
             float dx = 0, dy = 0;
 
             auto factor = kernel.at(x + center_x, y + center_y);
@@ -464,10 +399,10 @@ inline float ComputeHarrisScore(const gray8c_view_t& image, Point2i coords,
 
     double i_xx = 0, i_xy = 0, i_yy = 0;
     const auto& center_x = kernels.smoothing.center_x();
-    const auto& center_y = kernels.smoothing.center_x();
+    const auto& center_y = kernels.smoothing.center_y();
 
-    for (int y = -kernels.smoothing.lower_size(); y <= kernels.smoothing.upper_size(); ++y) {
-        for (int x = -kernels.smoothing.left_size(); x <= kernels.smoothing.upper_size(); ++x) {
+    for (int y = -kernels.smoothing.lower_size(); y <= (int) kernels.smoothing.upper_size(); ++y) {
+        for (int x = -kernels.smoothing.left_size(); x <= (int) kernels.smoothing.upper_size(); ++x) {
             Point2i sample_coords(coords.x + x, coords.y + y);
             float dx = Sample(image, sample_coords, kernels.dx);
             float dy = Sample(image, sample_coords, kernels.dy);
@@ -480,12 +415,13 @@ inline float ComputeHarrisScore(const gray8c_view_t& image, Point2i coords,
     }
 
     double det = i_xx * i_yy - i_xy * i_xy;
-    return static_cast<float>(det - k * (i_xx + i_yy));
+    double trace = i_xx + i_yy;
+    return static_cast<float>(det - k * trace);
 }
 
 /// Convert an RGB image to a grayscale image
 ///
-/// Note: This function is lifted from an example in the Boost GIL source tree and subject 
+/// Note: This function is based on an example in the Boost GIL source tree and subject 
 /// to the BOOST 1.0 license
 /// 
 /// Copyright 2019 Olzhas Zhumabek <anonymous.from.applecity@gmail.com>
@@ -493,7 +429,7 @@ inline float ComputeHarrisScore(const gray8c_view_t& image, Point2i coords,
 /// \param original the image to convert
 ///
 /// \return a grayscale image with same dimensions and resolution as the original
-boost::gil::gray8_image_t RgbToGrayscale(const boost::gil::rgb8_view_t& original) {
+boost::gil::gray8_image_t RgbToGrayscale(const boost::gil::rgb8c_view_t& original) {
     boost::gil::gray8_image_t output_image(original.dimensions());
     auto output = boost::gil::view(output_image);
 
@@ -527,6 +463,8 @@ boost::gil::gray8_image_t RgbToGrayscale(const boost::gil::rgb8_view_t& original
     return output_image;
 }
 
+/// Simple 2-dimensional bitmap type that can be used space (and cache-efficient) masking
+/// of image operations.
 class Bitmap {
 public:
     Bitmap(size_t width, size_t height)
@@ -536,13 +474,13 @@ public:
         std::fill(bits_.begin(), bits_.end(), false);
     }
 
-    void Set(size_t x, size_t y) {
-        size_t index = x * y * width_;
-        bits_[index] = true;
+    void Set(size_t x, size_t y, bool value = true) {
+        size_t index = x + y * width_;
+        bits_[index] = value;
     }
 
     bool Get(size_t x, size_t y) const {
-        size_t index = x * y * width_;
+        size_t index = x + y * width_;
         return bits_[index];
     }
 
@@ -554,49 +492,56 @@ private:
     std::vector<bool> bits_;
 };
 
-/// The parameters needed to fully specify ORB feature detection and descriptor
-struct OrbParameters {
-    /// The maximum number of features to return
-    unsigned max_features;
-
-    /// Minimum distance between returned feature points
-    int min_distance = 10;
-
-    /// Number of levels in the image pyramid
-    unsigned levels = 4;
-
-    /// Scale factor between levels in the pyramid
-    float scale_factor = sqrtf(0.5f);
-
-    /// FAST detection threshold
-    float threshold = 20;
-
-    /// window size for calculating orientation
-    int window_size = 7;
-    
-    /// Variance (sigma) of smoothing filter
-    float sigma = 1.0;
-
-    /// `k`-parameter in Harris score
-    float k = 0.15;
-};
-
-/// Detect ORB features and compute their descriptor values
+/// Compute the width of the border around the image where we should not look for 
+/// feature points because the various stages of the ORB detector algorithm may
+/// otherwise access the image outside of its range.
 ///
-/// \param original the original RGB image in which we want to detect feature points
 /// \param parameters the parameter set to apply during the various stages of the computation
 ///
-/// \returns the collection of detected features and their description
-std::vector<Descriptor> ComputeFeatures(const boost::gil::rgb8_view_t& original, const OrbParameters& parameters) {    
+/// \returns the border width in pixels
+inline unsigned BorderWidth(const Parameters& parameters) {
+    unsigned min_border = 0;
+
+    min_border = std::max(min_border, static_cast<unsigned>(ceilf(parameters.sigma * 3.0f) + 2));
+    min_border = std::max(min_border, static_cast<unsigned>(parameters.window_size / 2));
+    min_border = std::max(min_border, static_cast<unsigned>(M_SQRT2 * (kMaxSampleCoordinate + 1)));
+
+    return min_border;
+}
+
+} // namespace
+
+Detector::Detector(const Parameters& parameters)
+    : parameters_(parameters), kernels_(CreateKernels(parameters.sigma)) {}
+
+std::vector<Descriptor> 
+Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original, size_t max_features,
+                          ImageLogger * logger) const {    
     std::vector<Descriptor> result;
 
-    auto level_0 = RgbToGrayscale(original);
-    auto pyramid = CreatePyramid(std::move(level_0), parameters.scale_factor, parameters.levels);
+    unsigned border_width = BorderWidth(parameters_);
+    auto grayscale = RgbToGrayscale(original);
 
-    // For each level:
-    //  detect feature points and calculate their Harris score
-    //  determine the points with the highest score
-    //  fill in the decriptor using the image at the appropriate level
+    if (logger) {
+        logger->LogImage(const_view(grayscale), "Grayscale Conversion");
+    }
+
+    gray8_image_t level_0(grayscale.dimensions());
+    boost::gil::detail::convolve_2d(const_view(grayscale), kernels_.smoothing, view(level_0));
+
+    if (logger) {
+        logger->LogImage(const_view(level_0), "After Gaussian");
+    }
+
+    auto pyramid = CreatePyramid(std::move(level_0), parameters_.scale_factor, parameters_.levels);
+
+    if (logger) {
+        for (unsigned level = 1; level < pyramid.size(); ++level) {
+            std::stringstream message; 
+            message << "Image Pyramid Level " << level;
+            logger->LogImage(const_view(pyramid[level]), message.str());
+        }
+    }
 
     struct Candidate {
         Point2i     coords;
@@ -605,22 +550,52 @@ std::vector<Descriptor> ComputeFeatures(const boost::gil::rgb8_view_t& original,
     };
 
     std::vector<Candidate> candidates;
-    auto kernels = CreateKernels(parameters.sigma);
     float scale_factor = 1.0f;
     std::vector<float> pyramid_factor;
 
-    for (unsigned level = 0; level < parameters.levels; ++level, scale_factor *= parameters.scale_factor) {
+    for (unsigned level = 0; level < pyramid.size(); ++level, scale_factor *= parameters_.scale_factor) {
         pyramid_factor.push_back(1.0f/scale_factor);
 
         auto image_view = boost::gil::const_view(pyramid[level]);
         // TODO: Determine a border width to exclude feature points being generated too close to
         // the boundary of the image. This needs to reflect the mask/kernel sizes of all the processing
         // stages
-        auto points = DetectFastFeatures(image_view, parameters.threshold);
+        auto points = DetectFastFeatures(image_view, parameters_.threshold, border_width);
 
-        for (const auto& point: points) {
+        if (logger) {
+            boost::gil::rgb8_image_t display_features(image_view.dimensions());
+            auto output = view(display_features);
+
+            boost::gil::copy_pixels(color_converted_view<rgb8_pixel_t>(image_view), 
+                                    output);
+
+            const boost::gil::rgb8_pixel_t red(255, 0, 0);
+
+            for (const auto& feature: points) {
+                const auto& coords = feature.coord;
+
+                output(coords.x - 3, coords.y) = red;
+                output(coords.x - 2, coords.y) = red;
+                output(coords.x - 1, coords.y) = red;
+                output(coords.x + 1, coords.y) = red;
+                output(coords.x + 2, coords.y) = red;
+                output(coords.x + 3, coords.y) = red;
+                output(coords.x, coords.y - 3) = red;
+                output(coords.x, coords.y - 2) = red;
+                output(coords.x, coords.y - 1) = red;
+                output(coords.x, coords.y + 1) = red;
+                output(coords.x, coords.y + 2) = red;
+                output(coords.x, coords.y + 3) = red;
+            }
+
+            std::stringstream message;
+            message << "Detected features in level " << level;
+            logger->LogImage(const_view(display_features), message.str());
+        }
+
+        for (const auto& feature: points) {
             candidates.emplace_back(Candidate { 
-                point, level, ComputeHarrisScore(image_view, point, kernels, parameters.k)
+                feature.coord, level, ComputeHarrisScore(image_view, feature.coord, kernels_, parameters_.k)
             });
         }
     }
@@ -631,7 +606,7 @@ std::vector<Descriptor> ComputeFeatures(const boost::gil::rgb8_view_t& original,
     });
 
     // We are usng a simple bitmap to perform surpression of nearby features
-    float grid_size = parameters.min_distance * 0.5f;
+    float grid_size = parameters_.min_distance * 0.5f;
     float inv_grid_size = 1.0f / grid_size;
     size_t mask_width = ceilf(original.width() * inv_grid_size);
     size_t mask_height = ceilf(original.height() * inv_grid_size);
@@ -640,13 +615,13 @@ std::vector<Descriptor> ComputeFeatures(const boost::gil::rgb8_view_t& original,
 
     // Select the top N features and create the result
     for (const auto& feature: candidates) {
-        if (result.size() >= parameters.max_features) {
+        if (result.size() >= max_features) {
             break;
         }
 
-        auto scale = pyramid_factor[feature.level] * inv_grid_size;
+        auto scale = pyramid_factor[feature.level];
         Point2f coord(feature.coords.x * scale, feature.coords.y * scale);
-        int x = floorf(coord.x), y = floorf(coord.y);
+        int x = floorf(coord.x * inv_grid_size), y = floorf(coord.y * inv_grid_size);
 
         if (mask.Get(x, y)) {
             continue;
@@ -668,13 +643,31 @@ std::vector<Descriptor> ComputeFeatures(const boost::gil::rgb8_view_t& original,
         mask.Set(x_right, y_down);
 
         auto image = const_view(pyramid[feature.level]);
-        float angle = CalculateOrientation(image, feature.coords, parameters.window_size/2);
+        float angle = CalculateOrientation(image, feature.coords, parameters_.window_size/2);
         result.emplace_back(Descriptor {
             coord, angle, feature.level, ComputeDescriptor(image, feature.coords, angle)
         });
     }
 
+    if (logger) {
+        boost::gil::rgb8_image_t display_features(original.dimensions());
+        auto output = view(display_features);
+
+        boost::gil::copy_pixels(color_converted_view<rgb8_pixel_t>(const_view(pyramid[0])), 
+                                output);
+
+        const boost::gil::rgb8_pixel_t red(255, 0, 0);
+
+        for (const auto& feature: result) {
+            output(feature.coords.x, feature.coords.y) = red;
+            output(feature.coords.x - 1, feature.coords.y) = red;
+            output(feature.coords.x + 1, feature.coords.y) = red;
+            output(feature.coords.x, feature.coords.y - 1) = red;
+            output(feature.coords.x, feature.coords.y + 1) = red;
+        }
+
+        logger->LogImage(const_view(display_features), "Detected Features");
+    }
+
     return result;
 }
-
-} // namespace

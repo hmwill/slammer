@@ -34,6 +34,9 @@ include_directories(${SuiteSparse_INCLUDE_DIRS})
 find_package(g2o REQUIRED)
 include_directories(${g2o_INCLUDE_DIRS})
 
+find_package(libpng REQUIRED)
+include_directories(${libpng_INCLUDE_DIRS})
+
 # Incorporating rapidcsv directly because vcpkg/CMake interation non-functioning
 #find_package(rapidcsv REQUIRED)
 include_directories(third-party/rapidcsv)

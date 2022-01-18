@@ -45,13 +45,23 @@ namespace slammer {
 /// consider turning them into more generic versions lateron.
 namespace orb {
 
+/// Interface to allow for logging of images that are computed during the course of a
+/// computation
+class ImageLogger {
+public:
+    /// Log a grayscale image
+    virtual void LogImage(const boost::gil::gray8c_view_t image, 
+                          const std::string& name) = 0;
+
+    /// Log a color image
+    virtual void LogImage(const boost::gil::rgb8c_view_t image, 
+                          const std::string& name) = 0;
+};
+
 /// Descriptor of an ORB feature
 ///
 /// Overall, this structure utilizes 384 bits (48 bytes)
 struct Descriptor {
-    /// The decriptor is calculated using pixels within a circle with the following radius
-    static constexpr int kRadius = 13;
-
     /// Number of sample pairs used to calculate the descriptor. This corresponds to the number
     /// of descriptor bits.
     static constexpr size_t kNumSamples = 256;
@@ -69,6 +79,61 @@ struct Descriptor {
 
     /// the bit pattern identiyfing the feature
     Bits descriptor_;
+};
+
+/// The parameters needed to fully specify ORB feature detection and descriptor
+struct Parameters {
+    /// Minimum distance between returned feature points
+    int min_distance = 10;
+
+    /// Number of levels in the image pyramid
+    unsigned levels = 4;
+
+    /// Scale factor between levels in the pyramid
+    float scale_factor = sqrtf(0.5f);
+
+    /// FAST detection threshold
+    uint8_t threshold = 20;
+
+    /// window size for calculating orientation
+    int window_size = 7;
+    
+    /// Variance (sigma) of smoothing filter
+    float sigma = 1.0;
+
+    /// `k`-parameter in Harris score
+    float k = 0.15;
+};
+
+/// The kernels to use for computing the Harris scores
+struct HarrisKernels {
+    /// The kernel to use for calculating the gradient in x direction 
+    boost::gil::detail::kernel_2d<float> dx;
+
+    /// The kernel to use for calculating the gradient in y direction
+    boost::gil::detail::kernel_2d<float> dy;
+
+    /// The smoothing kernel to use for aggregating across tensor values
+    boost::gil::detail::kernel_2d<float> smoothing;
+};
+
+class Detector {
+public:
+    Detector(const Parameters& parameters);
+
+    /// Detect ORB features and compute their descriptor values
+    ///
+    /// \param original     the original RGB image in which we want to detect feature points
+    /// \param max_features the maximum number of features to return
+    ///
+    /// \returns the collection of detected features and their description
+    std::vector<Descriptor> ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
+                                            size_t max_features = 200,
+                                            ImageLogger * logger = nullptr) const;
+
+private:
+    Parameters parameters_;
+    HarrisKernels kernels_;
 };
 
 } // namespace orb
