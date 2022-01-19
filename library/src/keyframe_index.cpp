@@ -33,58 +33,11 @@
 using namespace slammer;
 
 //
-// FeatureDescriptor
-//
-
-FeatureDescriptor FeatureDescriptor::ComputeCentroid(const std::vector<const FeatureDescriptor*> descriptors) {
-    std::array<unsigned, kNumBits> counters;
-    counters.fill(0);
-
-    for (auto descriptor: descriptors) {
-        for (size_t index = 0; index < kNumBits; index += 8) {
-            counters[index + 0] += descriptor->descriptor_[index + 0];
-            counters[index + 1] += descriptor->descriptor_[index + 1];
-            counters[index + 2] += descriptor->descriptor_[index + 2];
-            counters[index + 3] += descriptor->descriptor_[index + 3];
-            counters[index + 4] += descriptor->descriptor_[index + 4];
-            counters[index + 5] += descriptor->descriptor_[index + 5];
-            counters[index + 6] += descriptor->descriptor_[index + 6];
-            counters[index + 7] += descriptor->descriptor_[index + 7];
-        }
-    }
-
-    unsigned threshold = descriptors.size() / 2 + descriptors.size() & 2;
-    FeatureDescriptor result;
-
-    for (size_t index = 0; index < kNumBits; ++index) {
-        result.descriptor_[index] = counters[index] > threshold;
-    }
-
-    return result;
-}
-
-FeatureDescriptor::Distance FeatureDescriptor::ComputeDistance(const FeatureDescriptor& first, const FeatureDescriptor& second) {
-    return (first.descriptor_ ^ second.descriptor_).count();
-}
-
-FeatureDescriptor::FeatureDescriptor(const uchar* bits) {
-    for (auto block_count = kNumBits / sizeof(Bitset::block_type); block_count; --block_count) {
-        Bitset::block_type block = 0;
-
-        for (auto byte_count = sizeof(Bitset::block_type) / 8; byte_count; --byte_count) {
-            block = (block << 8) | *bits++;
-        }
-
-        descriptor_.append(block);
-    }
-}
-
-//
 // Vocabulary
 //
 
 Vocabulary::Vocabulary(): word_count_(0), random_engine_(kSeed) {
-    FeatureDescriptors descriptors;
+    Descriptors descriptors;
     descriptors.emplace_back();
     ComputeVocabulary(descriptors);
 }
@@ -99,7 +52,7 @@ Vocabulary::Vocabulary(Vocabulary&& other) {
 
 Vocabulary::~Vocabulary() {}
 
-void Vocabulary::ComputeVocabulary(const FeatureDescriptors& descriptors) {
+void Vocabulary::ComputeVocabulary(const Descriptors& descriptors) {
     // Recursively partition the descriptors into sub-trees for each of the clusters
     root_ = ComputeSubtree(0, descriptors);
 
@@ -109,13 +62,13 @@ void Vocabulary::ComputeVocabulary(const FeatureDescriptors& descriptors) {
     }
 }
 
-Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDescriptors& descriptors) {
+Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const Descriptors& descriptors) {
     if (level == kLevels || descriptors.size() < kArity) {
         word_counts_.push_back(descriptors.size());
         return std::make_unique<Node>(word_count_++);
     } 
 
-    std::vector<FeatureDescriptor::Distance> min_distances;
+    std::vector<Descriptor::Distance> min_distances;
     min_distances.reserve(descriptors.size());
     std::vector<size_t> assigned_cluster(descriptors.size(), 0);
     std::vector<size_t> prefix_sum_distance;
@@ -126,7 +79,7 @@ Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDe
     cluster_center_indices[0] = distribution(random_engine_);
 
     for (const auto& descriptor: descriptors) {
-        min_distances.push_back(FeatureDescriptor::ComputeDistance(*descriptors[cluster_center_indices[0]],
+        min_distances.push_back(Descriptor::ComputeDistance(*descriptors[cluster_center_indices[0]],
                                                                    *descriptor));
     }
 
@@ -151,7 +104,7 @@ Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDe
         cluster_center_indices[index] = center_index;
 
         for (size_t descriptor_index = 0; descriptor_index != descriptors.size(); ++descriptor_index) {
-            auto new_distance = FeatureDescriptor::ComputeDistance(*descriptors[center_index],
+            auto new_distance = Descriptor::ComputeDistance(*descriptors[center_index],
                                                                    *descriptors[descriptor_index]);
 
             if (new_distance < min_distances[descriptor_index]) {
@@ -162,7 +115,7 @@ Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDe
     }
 
     Children children;
-    std::array<FeatureDescriptors, kArity> partitions;
+    std::array<Descriptors, kArity> partitions;
 
     // continue refining cluster assignments until we have convergence
     for (bool next_iteration = true; next_iteration;) {
@@ -177,7 +130,7 @@ Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDe
         }
 
         for (size_t index = 0; index <kArity; ++index) {
-            children[index].centroid = FeatureDescriptor::ComputeCentroid(partitions[index]);
+            children[index].centroid = Descriptor::ComputeCentroid(partitions[index]);
         }
 
         for (size_t index = 0; index < descriptors.size(); ++index) {
@@ -198,14 +151,14 @@ Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const FeatureDe
     return std::make_unique<Node>(std::move(children));
 }
 
-size_t Vocabulary::FindClosest(const Children& subtrees, const FeatureDescriptor& descriptor) {
+size_t Vocabulary::FindClosest(const Children& subtrees, const Descriptor& descriptor) {
     size_t min_distance_index = 0;
-    FeatureDescriptor::Distance min_distance = 
-        FeatureDescriptor::ComputeDistance(subtrees[0].centroid, descriptor);
+    Descriptor::Distance min_distance = 
+        Descriptor::ComputeDistance(subtrees[0].centroid, descriptor);
 
     for (size_t center_index = 1; center_index < kArity; ++center_index) {
-        FeatureDescriptor::Distance distance = 
-            FeatureDescriptor::ComputeDistance(subtrees[center_index].centroid, descriptor);
+        Descriptor::Distance distance = 
+            Descriptor::ComputeDistance(subtrees[center_index].centroid, descriptor);
 
         if (distance < min_distance) {
             min_distance = distance;
@@ -216,7 +169,7 @@ size_t Vocabulary::FindClosest(const Children& subtrees, const FeatureDescriptor
     return min_distance_index;
 }
 
-std::unique_ptr<ImageDescriptor> Vocabulary::Encode(const FeatureDescriptor::Set& descriptors) const {
+std::unique_ptr<ImageDescriptor> Vocabulary::Encode(const Descriptor::Collection& descriptors) const {
     auto result = std::make_unique<ImageDescriptor>();
 
     for (const auto& descriptor: descriptors) {
@@ -236,7 +189,7 @@ std::unique_ptr<ImageDescriptor> Vocabulary::Encode(const FeatureDescriptor::Set
     return std::move(result);
 }
 
-const Vocabulary::Word Vocabulary::FindWord(const FeatureDescriptor& descriptor) const {
+const Vocabulary::Word Vocabulary::FindWord(const Descriptor& descriptor) const {
     const Node* node = root_.get();
 
     while (std::holds_alternative<Children>(node->node_type)) {
@@ -286,7 +239,7 @@ KeyframeIndex::~KeyframeIndex() {}
 
 void KeyframeIndex::Insert(const KeyframePointer& keyframe) {
     if (!keyframe->descriptor) {
-        keyframe->descriptor = vocabulary_.Encode(FeatureDescriptor::From(keyframe->descriptions));
+        keyframe->descriptor = vocabulary_.Encode(Descriptor::From(keyframe->descriptions));
     }
 
     assert(reverse_index_.find(keyframe) == reverse_index_.end());
@@ -327,7 +280,7 @@ void KeyframeIndex::Delete(const KeyframePointer& keyframe) {
 void KeyframeIndex::Search(const KeyframePointer& query, std::vector<Result>& results,
                            size_t max_results) const {
     if (!query->descriptor) {
-        query->descriptor = vocabulary_.Encode(FeatureDescriptor::From(query->descriptions));
+        query->descriptor = vocabulary_.Encode(Descriptor::From(query->descriptions));
     }
 
     absl::btree_set<RowIndex> excluded_rows;

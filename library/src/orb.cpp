@@ -299,13 +299,13 @@ const int8_t kMaxSampleCoordinate = 13;
 /// \param angle    the rotation angle of the feature (in radian)
 ///
 /// \return The rotated BRIEF bit pattern describing the feature point
-inline Descriptor::Bits ComputeDescriptor(const gray8c_view_t& image, Point2i coords, float angle) {
-    Descriptor::Bits result;
+inline Descriptor ComputeDescriptor(const gray8c_view_t& image, Point2i coords, float angle) {
+    Descriptor result;
 
     gray8c_view_t::xy_locator center = image.xy_at(coords.x, coords.y);
     float cos = cosf(angle), sin = sinf(angle);
 
-    for (unsigned index = 0; index < Descriptor::kNumSamples; ++index) {
+    for (unsigned index = 0; index < Descriptor::kNumBits; ++index) {
         ptrdiff_t first_x = 
             static_cast<ptrdiff_t>(floorf(kSampleCoordinates[index].s0.x * cos - 
                                           kSampleCoordinates[index].s0.y * sin));
@@ -320,7 +320,7 @@ inline Descriptor::Bits ComputeDescriptor(const gray8c_view_t& image, Point2i co
             static_cast<ptrdiff_t>(floorf(kSampleCoordinates[index].s1.x * sin + 
                                           kSampleCoordinates[index].s1.y * cos));
 
-        result[index] = center(first_x, first_y) < center(second_x, second_y);
+        result.Set(index, center(first_x, first_y) < center(second_x, second_y));
     }
 
     return result;
@@ -512,10 +512,10 @@ inline unsigned BorderWidth(const Parameters& parameters) {
 Detector::Detector(const Parameters& parameters)
     : parameters_(parameters), kernels_(CreateKernels(parameters.sigma)) {}
 
-std::vector<Descriptor> 
+std::vector<KeyPoint> 
 Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original, size_t max_features,
                           ImageLogger * logger) const {    
-    std::vector<Descriptor> result;
+    std::vector<KeyPoint> result;
 
     unsigned border_width = BorderWidth(parameters_);
     auto grayscale = RgbToGrayscale(original);
@@ -642,7 +642,7 @@ Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original, size_t max_f
 
         auto image = const_view(pyramid[feature.level]);
         float angle = CalculateOrientation(image, feature.coords, parameters_.window_size/2);
-        result.emplace_back(Descriptor {
+        result.emplace_back(KeyPoint {
             coord, angle, feature.level, ComputeDescriptor(image, feature.coords, angle)
         });
     }

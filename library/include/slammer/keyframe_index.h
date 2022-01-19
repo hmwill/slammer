@@ -34,6 +34,7 @@
 #pragma once
 
 #include "slammer/slammer.h"
+#include "slammer/descriptor.h"
 
 #include "absl/container/btree_set.h"
 #include "absl/container/btree_map.h"
@@ -41,61 +42,6 @@
 #include "slammer/map.h"
 
 namespace slammer {
-
-/// Description of a single image feature
-///
-/// For ORB features, which we are using, the feature descriptor is a 256-bit vector.
-class FeatureDescriptor {
-public:
-    /// Number of bits per feature descriptor
-    static const size_t kNumBits = 256;
-
-    using Distance = size_t;
-    using Set = std::vector<FeatureDescriptor>;
-
-    // We are using a dynamic bitset from the boost library until we have descriptor extraction
-    // converted from not using OpenCV Mat types anymore.
-    using Bitset = boost::dynamic_bitset<uint64_t>;
-
-    FeatureDescriptor(): descriptor_(kNumBits) {}
-
-    /// Ceate a feature descriptor based on the contents of a row in the given OpenCV matrix.
-    /// The Matrix is expected to have elements of type CV_8UC1 and to have 32 columns.
-    static FeatureDescriptor From(const cv::Mat& mat, int row)  {
-        return FeatureDescriptor(mat.ptr(row));
-    }   
-
-    /// Ceate a feature descriptor based on the contents of all the rows in the given OpenCV matrix.
-    /// The Matrix is expected to have elements of type CV_8UC1 and to have 32 columns.
-    static Set From(const cv::Mat& mat) {
-        Set result;
-
-        for (int index = 0; index < mat.rows; ++index) {
-            result.emplace_back(From(mat, index));
-        }
-
-        return result;
-    }
-
-    static void IntoPointerVector(const Set& descriptors,
-                                  std::vector<const FeatureDescriptor*>& result) {
-        for (const auto& descriptor: descriptors) {
-            result.push_back(&descriptor);
-        }
-    }
-
-    /// Calculate the centroid of a collection of descriptors
-    static FeatureDescriptor ComputeCentroid(const std::vector<const FeatureDescriptor*> descriptors);
-
-    // Calculate the Hamming distance between two FeatureDescriptors
-    static Distance ComputeDistance(const FeatureDescriptor& first, const FeatureDescriptor& second);
-
-private:
-    FeatureDescriptor(const uchar* bits);
-    FeatureDescriptor(Bitset&& descriptor): descriptor_(descriptor) {}
-
-    Bitset descriptor_;
-};
 
 class ImageDescriptor;
 
@@ -111,7 +57,7 @@ class Vocabulary {
 public:
     /// Representation of a single word in the vocabulary
     using Word = uint32_t;
-    using FeatureDescriptors = std::vector<const FeatureDescriptor*>;
+    using Descriptors = std::vector<const Descriptor*>;
 
     Vocabulary();
     Vocabulary(Vocabulary&& other);
@@ -122,12 +68,12 @@ public:
     ///
     /// Should this be feature descriptors, or a collection of collections of feature descriptors?
     /// This mostly affects the word frequency calculation (relative to feature count vs. relative to frame count)
-    void ComputeVocabulary(const FeatureDescriptors& descriptors);
+    void ComputeVocabulary(const Descriptors& descriptors);
 
     /// Encode a set of feature descriptors using the vocabulary as imaeg descriptor
     ///
     /// \param descriptors the feature descriptors to encode via the vocabulary
-    std::unique_ptr<ImageDescriptor> Encode(const FeatureDescriptor::Set& descriptors) const;
+    std::unique_ptr<ImageDescriptor> Encode(const Descriptor::Collection& descriptors) const;
 
     size_t word_count() const { return word_count_; }
     
@@ -147,7 +93,7 @@ private:
     // Information associated with a single child of a node
     struct Child {
         // the centroid defining the cluster node
-        FeatureDescriptor centroid;
+        Descriptor centroid;
 
         // the associated sub-tree
         NodePointer subtree;
@@ -164,11 +110,11 @@ private:
         std::variant<Word, Children> node_type;
     };
 
-    NodePointer ComputeSubtree(size_t level, const FeatureDescriptors& descriptors);
+    NodePointer ComputeSubtree(size_t level, const Descriptors& descriptors);
 
-    static size_t FindClosest(const Children& subtrees, const FeatureDescriptor& descriptor);
+    static size_t FindClosest(const Children& subtrees, const Descriptor& descriptor);
 
-    const Word FindWord(const FeatureDescriptor& descriptor) const;
+    const Word FindWord(const Descriptor& descriptor) const;
 
     // root of the vocabulary tree
     NodePointer root_; 

@@ -34,6 +34,7 @@
 #pragma once
 
 #include "slammer/slammer.h"
+#include "slammer/descriptor.h"
 #include "slammer/image.h"
 
 namespace slammer {
@@ -44,16 +45,10 @@ namespace slammer {
 /// consider turning them into more generic versions lateron.
 namespace orb {
 
-/// Descriptor of an ORB feature
+/// Representation of an ORB key point
 ///
 /// Overall, this structure utilizes 384 bits (48 bytes)
-struct Descriptor {
-    /// Number of sample pairs used to calculate the descriptor. This corresponds to the number
-    /// of descriptor bits.
-    static constexpr size_t kNumSamples = 256;
-
-    using Bits = std::bitset<kNumSamples>;
-
+struct KeyPoint {
     /// the image coordinate
     Point2f coords;
 
@@ -64,7 +59,7 @@ struct Descriptor {
     uint32_t level;
 
     /// the bit pattern identiyfing the feature
-    Bits descriptor_;
+    Descriptor descriptor_;
 };
 
 /// The parameters needed to fully specify ORB feature detection and descriptor
@@ -113,7 +108,7 @@ public:
     /// \param max_features the maximum number of features to return
     ///
     /// \returns the collection of detected features and their description
-    std::vector<Descriptor> ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
+    std::vector<KeyPoint> ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
                                             size_t max_features = 200,
                                             ImageLogger * logger = nullptr) const;
 
