@@ -35,7 +35,38 @@
 
 #include "slammer/slammer.h"
 
+#include <boost/gil.hpp>
+
 namespace slammer {
+
+/// Interface to allow for logging of images that are computed during the course of a
+/// computation
+class ImageLogger {
+public:
+    /// Log a grayscale image
+    virtual void LogImage(const boost::gil::gray8c_view_t image, 
+                          const std::string& name) = 0;
+
+    /// Log a color image
+    virtual void LogImage(const boost::gil::rgb8c_view_t image, 
+                          const std::string& name) = 0;
+};
+
+class FileImageLogger: public ImageLogger {
+public:
+    FileImageLogger(const std::filesystem::path& prefix = std::filesystem::path()): prefix_(prefix) {}
+
+    virtual void LogImage(const boost::gil::gray8c_view_t image, 
+                          const std::string& name) override;
+
+    virtual void LogImage(const boost::gil::rgb8c_view_t image, 
+                          const std::string& name) override;
+
+private:
+    std::filesystem::path GetPath(const std::string& name, const std::string& suffix) const;
+
+    std::filesystem::path prefix_;
+};
 
 } // namespace slammer
 

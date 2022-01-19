@@ -34,8 +34,7 @@
 #pragma once
 
 #include "slammer/slammer.h"
-
-#include <boost/gil.hpp>
+#include "slammer/image.h"
 
 namespace slammer {
 
@@ -44,19 +43,6 @@ namespace slammer {
 /// Initially, we are formulating the algorithms in a rather concrete form, but may
 /// consider turning them into more generic versions lateron.
 namespace orb {
-
-/// Interface to allow for logging of images that are computed during the course of a
-/// computation
-class ImageLogger {
-public:
-    /// Log a grayscale image
-    virtual void LogImage(const boost::gil::gray8c_view_t image, 
-                          const std::string& name) = 0;
-
-    /// Log a color image
-    virtual void LogImage(const boost::gil::rgb8c_view_t image, 
-                          const std::string& name) = 0;
-};
 
 /// Descriptor of an ORB feature
 ///

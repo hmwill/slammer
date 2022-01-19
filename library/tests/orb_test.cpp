@@ -34,42 +34,22 @@
 
 #include "slammer/orb.h"
 
-#include "boost/gil/io/write_view.hpp"
 #include "boost/gil/extension/io/png.hpp"
 
 
 using namespace slammer;
 using namespace slammer::orb;
 
-namespace {
-
-struct FileImageLogger: public ImageLogger {
-
-    virtual void LogImage(const boost::gil::gray8c_view_t image, 
-                          const std::string& name) override {
-        std::string path = name + ".png";
-        boost::gil::write_view(path, image, boost::gil::png_tag{});
-    }
-
-    virtual void LogImage(const boost::gil::rgb8c_view_t image, 
-                          const std::string& name) override {
-        std::string path = name + ".png";
-        boost::gil::write_view(path, image, boost::gil::png_tag{});
-    }
-};
-
-}
 
 TEST(OrbTest, Basic) {
     Parameters parameters;
     Detector detector(parameters);
-    FileImageLogger logger;
+    FileImageLogger logger("image_logs");
 
     std::string kInputPath("data/cafe1-1/color/1560004885.446172.png");
     boost::gil::rgb8_image_t input;
     boost::gil::read_image(kInputPath, input, boost::gil::png_tag{});
 
-    //auto features = detector.ComputeFeatures(const_view(input), 500, &logger);
-    auto features = detector.ComputeFeatures(const_view(input), 500, nullptr);
+    auto features = detector.ComputeFeatures(const_view(input), 500, &logger);
     EXPECT_LE(features.size(), 500);
 }

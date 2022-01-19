@@ -41,6 +41,7 @@
 #include <cstdint>
 #include <chrono>
 #include <exception>
+#include <filesystem>
 #include <future>
 #include <fstream>
 #include <iostream>

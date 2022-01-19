@@ -29,3 +29,37 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "slammer/image.h"
+
+#include "boost/gil/io/write_view.hpp"
+#include "boost/gil/extension/io/png.hpp"
+
+using namespace slammer;
+
+void 
+FileImageLogger::LogImage(const boost::gil::gray8c_view_t image, 
+                          const std::string& name) {
+    auto path = GetPath(name, "png");
+    boost::gil::write_view(path.string(), image, boost::gil::png_tag{});
+}
+
+void 
+FileImageLogger::LogImage(const boost::gil::rgb8c_view_t image, 
+                          const std::string& name) {
+    auto path = GetPath(name, "png");
+    boost::gil::write_view(path.string(), image, boost::gil::png_tag{});
+}
+
+std::filesystem::path 
+FileImageLogger::GetPath(const std::string& name, const std::string& suffix) const {
+    if (!std::filesystem::exists(prefix_)) {
+        // TODO: Not sure yet about how to handle error situations here. For now, we just
+        // eat the error silently, but will end up failing when the actual write operation is
+        // called.
+        std::error_code error;
+        bool did_create = std::filesystem::create_directories(prefix_, error);
+    }
+
+    auto result = prefix_ / name;
+    result.replace_extension(suffix);
+    return result;
+}

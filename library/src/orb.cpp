@@ -156,10 +156,8 @@ inline std::vector<FastFeature> DetectFastFeatures(const gray8c_view_t& image, u
 
 
             if (Has12ConsecutiveBits(below)) {
-                assert(__popcnt16(below) >= 12);
                 result.emplace_back(feature);
             } else if (Has12ConsecutiveBits(above)) {
-                assert(__popcnt16(above) >= 12);
                 result.emplace_back(feature);
             }
 
