@@ -70,7 +70,7 @@ public:
     /// This mostly affects the word frequency calculation (relative to feature count vs. relative to frame count)
     void ComputeVocabulary(const Descriptors& descriptors);
 
-    /// Encode a set of feature descriptors using the vocabulary as imaeg descriptor
+    /// Encode a set of feature descriptors using the vocabulary as image descriptor
     ///
     /// \param descriptors the feature descriptors to encode via the vocabulary
     std::unique_ptr<ImageDescriptor> Encode(const Descriptor::Collection& descriptors) const;

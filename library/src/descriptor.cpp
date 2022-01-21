@@ -53,7 +53,7 @@ Descriptor Descriptor::ComputeCentroid(const std::vector<const Descriptor*> desc
         }
     }
 
-    unsigned threshold = descriptors.size() / 2 + descriptors.size() & 2;
+    unsigned threshold = descriptors.size() / 2 + (descriptors.size() % 2);
     Descriptor result;
 
     for (size_t index = 0; index < kNumBits; ++index) {
@@ -78,4 +78,8 @@ Descriptor::Descriptor(const uchar* bits) {
         descriptor_.append(block);
     }
 }
+
+//
+// DescriptorTree
+//
 

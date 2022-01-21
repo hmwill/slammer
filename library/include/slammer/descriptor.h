@@ -112,15 +112,249 @@ private:
     Bitset descriptor_;
 };
 
+struct Empty {};
+
+template <typename Value>
+struct Default {
+    template <typename Arg>
+    Value operator() (const Arg&) const { return Value{}; }
+};
+
 /// A tree data structure to support matching of descriptors. The structure of the tree
 /// can be learned using a recursive k-means clustering method. The tree can also be
 /// serialized and recreated to support peristing the tree structure across program
 /// executions.
+///
+/// \tparam LeafData    Data associated with each leaf in the tree
+template <typename LeafData = Empty, typename Func = Default<LeafData>, size_t kArity = 10>
 class DescriptorTree {
 public:
+    typedef LeafData Value;
+    typedef std::vector<Descriptor> Descriptors;
+
+    /// Default constructor
+    DescriptorTree()
+        : random_engine_(kSeed) {};
+
+    /// Calculate a the tree structure based on the distribution represented by the 
+    /// provided collection of descriptors
+    ///
+    /// \param descriptors  a collection of descriptors from which the tree structure
+    ///                     should be derived
+    inline void ComputeTree(const Descriptors& descriptors, size_t max_level);
+
+    /// Find the nearest leaf node in the tree data structure.
+    ///
+    /// \param descriptor the descriptor to locate in the tree
+    ///
+    /// \returns writable reference to the data stored within the leaf
+    inline Value& FindNearest(const Descriptor& descriptor);
+
+    /// Find the nearest leaf node in the tree data structure.
+    ///
+    /// \param descriptor the descriptor to locate in the tree
+    ///
+    /// \returns read-only reference to the data stored within the leaf
+    inline const Value& FindNearest(const Descriptor& descriptor) const;
 
 private:
+    typedef std::vector<const Descriptor *> DescriptorPointers;
+
+    struct Node;
+    using NodePointer = std::unique_ptr<Node>;
+
+    /// The number of tree levels
+    static const size_t kLevels = 6;
+
+    /// Random number generator seed
+    static const int kSeed = 12345;
+
+    // Information associated with a single child of a node
+    struct Child {
+        // the centroid defining the cluster node
+        Descriptor centroid;
+
+        // the associated sub-tree
+        NodePointer subtree;
+    };
+
+    // The pointers of the root nodes of each sub-tree
+    using Children = std::array<Child, kArity>;
+
+    // Representation of a vocabulary tree node
+    struct Node {
+        Node(Value&& value): node_type(std::move(value)) {}
+        Node(Children&& children): node_type(std::move(children)) {}
+
+        std::variant<Value, Children> node_type;
+    };
+
+    // Recursive construction of the descriptor tree
+    inline NodePointer ComputeSubtree(const DescriptorPointers& descriptors, size_t max_levels);
+
+    // Create a leaf value, possibly using information about the descriptor set mapped to it
+    inline Value CreateLeaf(const DescriptorPointers& Descriptors);
+
+    // Determine the child tree whose median is closest to the query descriptor
+    inline static size_t FindClosest(const Children& subtrees, const Descriptor& descriptor,
+                                     size_t first_index = 0);
+
+    // root of the descriptor tree
+    NodePointer root_; 
+
+    // Random number generator to use
+    std::default_random_engine random_engine_;
 };
+
+template <typename LeafData, typename Func, size_t kArity>
+void DescriptorTree<LeafData, Func, kArity>::ComputeTree(const Descriptors& descriptors, size_t max_levels) {
+    DescriptorPointers pointers;
+    std::transform(descriptors.begin(), descriptors.end(), 
+                   std::back_inserter(pointers), [](const auto& descriptor) { return &descriptor; });
+    root_ = ComputeSubtree(pointers, max_levels);
+}
+
+template <typename LeafData, typename Func, size_t kArity>
+typename DescriptorTree<LeafData, Func, kArity>::Value& 
+DescriptorTree<LeafData, Func, kArity>::FindNearest(const Descriptor& descriptor) {
+    NodePointer * p_node = &root_;
+
+    while (std::holds_alternative<Children>((*p_node)->node_type)) {
+        auto& children = std::get<Children>((*p_node)->node_type);
+        p_node = &children[FindClosest(children, descriptor)].subtree;
+    }
+
+    return std::get<Value>((*p_node)->node_type);
+}
+
+template <typename LeafData, typename Func, size_t kArity>
+const typename DescriptorTree<LeafData, Func, kArity>::Value& 
+DescriptorTree<LeafData, Func, kArity>::FindNearest(const Descriptor& descriptor) const {
+    const NodePointer * p_node = &root_;
+
+    while (std::holds_alternative<Children>((*p_node)->node_type)) {
+        const auto& children = std::get<Children>((*p_node)->node_type);
+        p_node = &children[FindClosest(children, descriptor)].subtree;
+    }
+
+    return std::get<Value>((*p_node)->node_type);
+}
+
+template <typename LeafData, typename Func, size_t kArity>
+typename DescriptorTree<LeafData, Func, kArity>::NodePointer 
+DescriptorTree<LeafData, Func, kArity>::ComputeSubtree(const DescriptorPointers& descriptors, size_t max_levels) {
+    if (!max_levels || descriptors.size() < kArity) {
+        return std::make_unique<Node>(CreateLeaf(descriptors));
+    } 
+
+    std::vector<Descriptor::Distance> min_distances;
+    min_distances.reserve(descriptors.size());
+    std::vector<size_t> assigned_cluster(descriptors.size(), 0);
+    std::vector<size_t> prefix_sum_distance;
+    std::array<size_t, kArity> cluster_center_indices;
+
+    // pick the first cluster center
+    std::uniform_int_distribution<size_t> distribution(0, descriptors.size() - 1);
+    cluster_center_indices[0] = distribution(random_engine_);
+
+    for (const auto& descriptor: descriptors) {
+        min_distances.push_back(Descriptor::ComputeDistance(*descriptors[cluster_center_indices[0]],
+                                                                   *descriptor));
+    }
+
+    // Iteratively determine the next cluster centers
+    for (size_t index = 1; index < kArity; ++index) {
+        prefix_sum_distance.clear();
+        size_t total_weight = 0;
+
+        for (auto distance: min_distances) {
+            total_weight += distance * distance;
+            prefix_sum_distance.push_back(total_weight);
+        }
+
+        std::uniform_int_distribution<size_t> distribution(0, total_weight - 1);
+
+        auto split_point = std::max(static_cast<size_t>(1), distribution(random_engine_));
+        auto split_iter = std::lower_bound(prefix_sum_distance.begin(), prefix_sum_distance.end(), split_point);
+        assert(split_iter != prefix_sum_distance.end());
+
+        size_t center_index = split_iter - prefix_sum_distance.begin();
+
+        cluster_center_indices[index] = center_index;
+
+        for (size_t descriptor_index = 0; descriptor_index != descriptors.size(); ++descriptor_index) {
+            auto new_distance = Descriptor::ComputeDistance(*descriptors[center_index],
+                                                                   *descriptors[descriptor_index]);
+
+            if (new_distance < min_distances[descriptor_index]) {
+                min_distances[descriptor_index] = new_distance;
+                assigned_cluster[descriptor_index] = index;
+            }
+        }
+    }
+
+    Children children;
+    std::array<DescriptorPointers, kArity> partitions;
+
+    // continue refining cluster assignments until we have convergence
+    for (bool next_iteration = true; next_iteration;) {
+        next_iteration = false;
+
+        for (auto& partition: partitions) {
+            partition.clear();
+        }
+
+        for (size_t index = 0; index < descriptors.size(); ++index) {
+            partitions[assigned_cluster[index]].push_back(descriptors[index]);
+        }
+
+        for (size_t index = 0; index < partitions.size(); ++index) {
+            children[index].centroid = Descriptor::ComputeCentroid(partitions[index]);
+        }
+
+        for (size_t index = 0; index < descriptors.size(); ++index) {
+            size_t min_distance_index = FindClosest(children, *descriptors[index], assigned_cluster[index]);
+
+            if (assigned_cluster[index] != min_distance_index) {
+                assigned_cluster[index] = min_distance_index;
+                next_iteration = true;
+            }
+        }
+
+    }
+
+    for (size_t child_index = 0; child_index < kArity; ++child_index) {
+        children[child_index].subtree = ComputeSubtree(partitions[child_index], max_levels - 1);
+    }
+
+    return std::make_unique<Node>(std::move(children));
+}
+
+template <typename LeafData, typename Func, size_t kArity>
+typename DescriptorTree<LeafData, Func, kArity>::Value 
+DescriptorTree<LeafData, Func, kArity>::CreateLeaf(const DescriptorPointers& descriptors) {
+    Func func;
+    return func(descriptors);
+}
+
+template <typename LeafData, typename Func, size_t kArity>
+size_t DescriptorTree<LeafData, Func, kArity>::FindClosest(const Children& subtrees, const Descriptor& descriptor, size_t first_index) {
+    size_t min_distance_index = first_index;
+    Descriptor::Distance min_distance = 
+        Descriptor::ComputeDistance(subtrees[first_index].centroid, descriptor);
+
+    for (size_t center_index = (first_index + 1) % subtrees.size(); center_index != first_index; center_index = (center_index + 1) % subtrees.size()) {
+        Descriptor::Distance distance = 
+            Descriptor::ComputeDistance(subtrees[center_index].centroid, descriptor);
+
+        if (distance < min_distance) {
+            min_distance = distance;
+            min_distance_index = center_index;
+        }
+    }
+
+    return min_distance_index;
+}
 
 } // namespace slammer
 
