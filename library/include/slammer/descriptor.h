@@ -114,8 +114,10 @@ private:
 
 struct Empty {};
 
-template <typename Value>
+template <typename LeafData>
 struct Default {
+    using Value = LeafData;
+
     template <typename Arg>
     Value operator() (const Arg&) const { return Value{}; }
 };
@@ -125,23 +127,39 @@ struct Default {
 /// serialized and recreated to support peristing the tree structure across program
 /// executions.
 ///
-/// \tparam LeafData    Data associated with each leaf in the tree
-template <typename LeafData = Empty, typename Func = Default<LeafData>, size_t kArity = 10>
+/// \tparam LeafData    The factory function object for data values stored at the leaves.
+/// \tparam kArity      The arity of tree nodes
+template <typename LeafFunc = Default<Empty>, size_t kArity = 10>
 class DescriptorTree {
 public:
-    typedef LeafData Value;
-    typedef std::vector<Descriptor> Descriptors;
+    /// Random number generator seed
+    static const int kSeed = 12345;
 
-    /// Default constructor
-    DescriptorTree()
-        : random_engine_(kSeed) {};
+    typedef std::vector<Descriptor> Descriptors;
+    typedef std::vector<const Descriptor *> DescriptorPointers;
+
+    /// the factory function object type for leaf node values
+    using LeafFactory = LeafFunc;
+
+    /// the value type for leaves
+    using Value = typename LeafFunc::Value;
+
+    /// the argument type provided to the leaf node factory function
+    using FactoryArgs = DescriptorPointers;
+
+    DescriptorTree(const LeafFactory& factory = LeafFactory(), int seed = kSeed)
+        : random_engine_(seed), factory_(factory) {};
+
+    DescriptorTree(LeafFactory&& factory, int seed = kSeed)
+        : random_engine_(seed), factory_(std::move(factory)) {};
 
     /// Calculate a the tree structure based on the distribution represented by the 
     /// provided collection of descriptors
     ///
     /// \param descriptors  a collection of descriptors from which the tree structure
     ///                     should be derived
-    inline void ComputeTree(const Descriptors& descriptors, size_t max_level);
+    /// \param max_depth    the maximum depth of the tree
+    inline void ComputeTree(const Descriptors& descriptors, size_t max_depth);
 
     /// Find the nearest leaf node in the tree data structure.
     ///
@@ -158,16 +176,11 @@ public:
     inline const Value& FindNearest(const Descriptor& descriptor) const;
 
 private:
-    typedef std::vector<const Descriptor *> DescriptorPointers;
-
     struct Node;
     using NodePointer = std::unique_ptr<Node>;
 
     /// The number of tree levels
     static const size_t kLevels = 6;
-
-    /// Random number generator seed
-    static const int kSeed = 12345;
 
     // Information associated with a single child of a node
     struct Child {
@@ -190,7 +203,7 @@ private:
     };
 
     // Recursive construction of the descriptor tree
-    inline NodePointer ComputeSubtree(const DescriptorPointers& descriptors, size_t max_levels);
+    inline NodePointer ComputeSubtree(const DescriptorPointers& descriptors, size_t max_depth);
 
     // Create a leaf value, possibly using information about the descriptor set mapped to it
     inline Value CreateLeaf(const DescriptorPointers& Descriptors);
@@ -204,19 +217,22 @@ private:
 
     // Random number generator to use
     std::default_random_engine random_engine_;
+
+    // the factory for leaf values
+    LeafFactory factory_;
 };
 
-template <typename LeafData, typename Func, size_t kArity>
-void DescriptorTree<LeafData, Func, kArity>::ComputeTree(const Descriptors& descriptors, size_t max_levels) {
+template <typename LeafFunc, size_t kArity>
+void DescriptorTree<LeafFunc, kArity>::ComputeTree(const Descriptors& descriptors, size_t max_depth) {
     DescriptorPointers pointers;
     std::transform(descriptors.begin(), descriptors.end(), 
                    std::back_inserter(pointers), [](const auto& descriptor) { return &descriptor; });
-    root_ = ComputeSubtree(pointers, max_levels);
+    root_ = ComputeSubtree(pointers, max_depth);
 }
 
-template <typename LeafData, typename Func, size_t kArity>
-typename DescriptorTree<LeafData, Func, kArity>::Value& 
-DescriptorTree<LeafData, Func, kArity>::FindNearest(const Descriptor& descriptor) {
+template <typename LeafFunc, size_t kArity>
+typename DescriptorTree<LeafFunc, kArity>::Value& 
+DescriptorTree<LeafFunc, kArity>::FindNearest(const Descriptor& descriptor) {
     NodePointer * p_node = &root_;
 
     while (std::holds_alternative<Children>((*p_node)->node_type)) {
@@ -227,9 +243,9 @@ DescriptorTree<LeafData, Func, kArity>::FindNearest(const Descriptor& descriptor
     return std::get<Value>((*p_node)->node_type);
 }
 
-template <typename LeafData, typename Func, size_t kArity>
-const typename DescriptorTree<LeafData, Func, kArity>::Value& 
-DescriptorTree<LeafData, Func, kArity>::FindNearest(const Descriptor& descriptor) const {
+template <typename LeafFunc, size_t kArity>
+const typename DescriptorTree<LeafFunc, kArity>::Value& 
+DescriptorTree<LeafFunc, kArity>::FindNearest(const Descriptor& descriptor) const {
     const NodePointer * p_node = &root_;
 
     while (std::holds_alternative<Children>((*p_node)->node_type)) {
@@ -240,10 +256,10 @@ DescriptorTree<LeafData, Func, kArity>::FindNearest(const Descriptor& descriptor
     return std::get<Value>((*p_node)->node_type);
 }
 
-template <typename LeafData, typename Func, size_t kArity>
-typename DescriptorTree<LeafData, Func, kArity>::NodePointer 
-DescriptorTree<LeafData, Func, kArity>::ComputeSubtree(const DescriptorPointers& descriptors, size_t max_levels) {
-    if (!max_levels || descriptors.size() < kArity) {
+template <typename LeafFunc, size_t kArity>
+typename DescriptorTree<LeafFunc, kArity>::NodePointer 
+DescriptorTree<LeafFunc, kArity>::ComputeSubtree(const DescriptorPointers& descriptors, size_t max_depth) {
+    if (!max_depth || descriptors.size() < kArity) {
         return std::make_unique<Node>(CreateLeaf(descriptors));
     } 
 
@@ -324,21 +340,20 @@ DescriptorTree<LeafData, Func, kArity>::ComputeSubtree(const DescriptorPointers&
     }
 
     for (size_t child_index = 0; child_index < kArity; ++child_index) {
-        children[child_index].subtree = ComputeSubtree(partitions[child_index], max_levels - 1);
+        children[child_index].subtree = ComputeSubtree(partitions[child_index], max_depth - 1);
     }
 
     return std::make_unique<Node>(std::move(children));
 }
 
-template <typename LeafData, typename Func, size_t kArity>
-typename DescriptorTree<LeafData, Func, kArity>::Value 
-DescriptorTree<LeafData, Func, kArity>::CreateLeaf(const DescriptorPointers& descriptors) {
-    Func func;
-    return func(descriptors);
+template <typename LeafFunc, size_t kArity>
+typename DescriptorTree<LeafFunc, kArity>::Value 
+DescriptorTree<LeafFunc, kArity>::CreateLeaf(const DescriptorPointers& descriptors) {
+    return factory_(descriptors);
 }
 
-template <typename LeafData, typename Func, size_t kArity>
-size_t DescriptorTree<LeafData, Func, kArity>::FindClosest(const Children& subtrees, const Descriptor& descriptor, size_t first_index) {
+template <typename LeafFunc, size_t kArity>
+size_t DescriptorTree<LeafFunc, kArity>::FindClosest(const Children& subtrees, const Descriptor& descriptor, size_t first_index) {
     size_t min_distance_index = first_index;
     Descriptor::Distance min_distance = 
         Descriptor::ComputeDistance(subtrees[first_index].centroid, descriptor);

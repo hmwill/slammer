@@ -81,12 +81,14 @@ TEST(DescriptorTest, BuildTree) {
     }
 
     struct CreateLeaf {
+        typedef Descriptor Value;
+        
         Descriptor operator() (const std::vector<const Descriptor*> descriptors) const {
             return Descriptor::ComputeCentroid(descriptors);
         }
     };
 
-    DescriptorTree<Descriptor, CreateLeaf> tree;
+    DescriptorTree<CreateLeaf> tree;
 
     tree.ComputeTree(descriptors, 2);
     auto leaf = tree.FindNearest(descriptors[0]);
