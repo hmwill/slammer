@@ -82,7 +82,7 @@ TEST(DescriptorTest, BuildTree) {
 
     struct CreateLeaf {
         typedef Descriptor Value;
-        
+
         Descriptor operator() (const std::vector<const Descriptor*> descriptors) const {
             return Descriptor::ComputeCentroid(descriptors);
         }
@@ -93,4 +93,62 @@ TEST(DescriptorTest, BuildTree) {
     tree.ComputeTree(descriptors, 2);
     auto leaf = tree.FindNearest(descriptors[0]);
     EXPECT_TRUE(leaf.Get(0));
+}
+
+TEST(DescriptorTest, SearchTree) {
+    std::vector<Descriptor> descriptors;
+
+    for (size_t cluster = 0; cluster < 10; ++cluster) {
+        size_t cluster_offset = cluster * 25;
+        size_t group_offset = cluster_offset + 10;
+
+        for (size_t member = 0; member < 8; ++member) {
+            Descriptor descriptor;
+
+            descriptor.Set(cluster_offset);
+            descriptor.Set(cluster_offset + 1);
+            descriptor.Set(cluster_offset + 2);
+            descriptor.Set(cluster_offset + 3);
+            descriptor.Set(cluster_offset + 4);
+            descriptor.Set(cluster_offset + 5);
+            descriptor.Set(cluster_offset + 6);
+
+
+            descriptor.Set(group_offset + (member) % 15);
+            descriptor.Set(group_offset + (member + 2) % 15);
+            descriptor.Set(group_offset + (member + 4) % 15);
+
+            descriptors.emplace_back(descriptor);
+        }
+    }
+
+    struct CreateLeaf {
+        typedef std::vector<Descriptor> Value;
+        
+        Value operator() (const std::vector<const Descriptor*> descriptors) const {
+            Value result;
+            std::transform(descriptors.begin(), descriptors.end(), std::back_inserter(result),
+                           [](const auto& value) { return *value; });
+            return result;
+        }
+    };
+
+    DescriptorTree<CreateLeaf> tree;
+
+    tree.ComputeTree(descriptors, 2);
+
+    for (const auto& descriptor: descriptors) {
+        auto leaf = tree.FindNearest(descriptor);
+
+        // each leaf is a proper subset
+        EXPECT_LT(leaf.size(), descriptors.size());
+        
+        // should have a direct match of the query descriptor 
+        auto iter = std::find_if(leaf.begin(), leaf.end(), 
+                                 [&](const auto &candidate) { 
+                                    return Descriptor::ComputeDistance(candidate, descriptor) == 0;
+                                 });
+
+        EXPECT_NE(iter, leaf.end());
+    }
 }
