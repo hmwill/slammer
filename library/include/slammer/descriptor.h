@@ -147,11 +147,16 @@ public:
     /// the argument type provided to the leaf node factory function
     using FactoryArgs = DescriptorPointers;
 
+    DescriptorTree(DescriptorTree& other) 
+        : random_engine_(std::move(other.random_engine_)), 
+          factory_(std::move(other.factory_)), 
+          root_(std::move(other.root_)) {}
+
     DescriptorTree(const LeafFactory& factory = LeafFactory(), int seed = kSeed)
-        : random_engine_(seed), factory_(factory) {};
+        : random_engine_(seed), factory_(factory) {}
 
     DescriptorTree(LeafFactory&& factory, int seed = kSeed)
-        : random_engine_(seed), factory_(std::move(factory)) {};
+        : random_engine_(seed), factory_(std::move(factory)) {}
 
     /// Calculate a the tree structure based on the distribution represented by the 
     /// provided collection of descriptors
@@ -174,6 +179,9 @@ public:
     ///
     /// \returns read-only reference to the data stored within the leaf
     inline const Value& FindNearest(const Descriptor& descriptor) const;
+
+    LeafFactory& factory() { return factory_; }
+    const LeafFactory& factory() const { return factory_; }
 
 private:
     struct Node;

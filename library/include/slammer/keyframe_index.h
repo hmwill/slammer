@@ -57,10 +57,12 @@ class Vocabulary {
 public:
     /// Representation of a single word in the vocabulary
     using Word = uint32_t;
-    using Descriptors = std::vector<const Descriptor*>;
+
+    /// Maximum tree depth
+    static constexpr size_t kMaxDepth = 6;
 
     Vocabulary();
-    Vocabulary(Vocabulary&& other);
+    //Vocabulary(Vocabulary&& other);
 
     ~Vocabulary();
 
@@ -68,68 +70,46 @@ public:
     ///
     /// Should this be feature descriptors, or a collection of collections of feature descriptors?
     /// This mostly affects the word frequency calculation (relative to feature count vs. relative to frame count)
-    void ComputeVocabulary(const Descriptors& descriptors);
+    void ComputeVocabulary(const Descriptor::Collection& descriptors);
 
     /// Encode a set of feature descriptors using the vocabulary as image descriptor
     ///
     /// \param descriptors the feature descriptors to encode via the vocabulary
     std::unique_ptr<ImageDescriptor> Encode(const Descriptor::Collection& descriptors) const;
 
-    size_t word_count() const { return word_count_; }
+    size_t word_count() const { return state().word_count; }
     
 private:
-    struct Node;
-    using NodePointer = std::unique_ptr<Node>;
+    struct State {
+        using Value = Word;
 
-    /// Each node has this number of children
-    static const size_t kArity = 10;
+        State(): word_count(0) {}
 
-    /// The number of tree levels
-    static const size_t kLevels = 6;
+        // total number of words in the vocabulary
+        Word word_count;
 
-    /// Random number generator seed
-    static const int kSeed = 12345;
+        // number of occurrences of each word in training corpus
+        std::vector<unsigned> word_counts;
 
-    // Information associated with a single child of a node
-    struct Child {
-        // the centroid defining the cluster node
-        Descriptor centroid;
+        // word weight based on inverse document frequency
+        std::vector<double> word_weights;
 
-        // the associated sub-tree
-        NodePointer subtree;
+        // How to construct the value associated with the leaves of the tree, which correspond to
+        // the words of the vocabulary
+        Word operator() (const std::vector<const Descriptor *>& descriptors) {
+            word_counts.push_back(descriptors.size());
+            return word_count++;            
+        }
     };
 
-    // The pointers of the root nodes of each sub-tree
-    using Children = std::array<Child, kArity>;
+    using Tree = DescriptorTree<State>;
 
-    // Representation of a vocabulary tree node
-    struct Node {
-        Node(Word word): node_type(word) {}
-        Node(Children&& children): node_type(std::move(children)) {}
+    const Word FindWord(const Descriptor& descriptor) const { return tree_.FindNearest(descriptor); }
 
-        std::variant<Word, Children> node_type;
-    };
+    const State& state() const { return tree_.factory(); }
+    State& state() { return tree_.factory(); }
 
-    NodePointer ComputeSubtree(size_t level, const Descriptors& descriptors);
-
-    static size_t FindClosest(const Children& subtrees, const Descriptor& descriptor);
-
-    const Word FindWord(const Descriptor& descriptor) const;
-
-    // root of the vocabulary tree
-    NodePointer root_; 
-
-    // total number of words in the vocabulary
-    Word word_count_;
-
-    // number of occurrences of each word in training corpus
-    std::vector<unsigned> word_counts_;
-
-    // word weight based on inverse document frequency
-    std::vector<double> word_weights_;
-
-    /// Random number generator to use
-    std::default_random_engine random_engine_;
+    Tree tree_;
 };
 
 /// Description of a single image as a bag of words, that is, for all features that are

@@ -36,146 +36,42 @@ using namespace slammer;
 // Vocabulary
 //
 
-Vocabulary::Vocabulary(): word_count_(0), random_engine_(kSeed) {
-    Descriptors descriptors;
-    descriptors.emplace_back();
-    ComputeVocabulary(descriptors);
+Vocabulary::Vocabulary(): tree_(State()) {
+    Tree::Descriptors descriptors;
+    descriptors.emplace_back(Descriptor());
+    tree_.ComputeTree(descriptors, kMaxDepth);
 }
 
-Vocabulary::Vocabulary(Vocabulary&& other) {
-    std::swap(root_, other.root_);
-    std::swap(word_count_, other.word_count_);
-    std::swap(word_counts_, other.word_counts_);
-    std::swap(word_weights_, other.word_weights_);
-    std::swap(random_engine_, other.random_engine_);
-}
+// Vocabulary::Vocabulary(Vocabulary&& other) {
+//     std::swap(root_, other.root_);
+//     std::swap(word_count_, other.word_count_);
+//     std::swap(word_counts_, other.word_counts_);
+//     std::swap(word_weights_, other.word_weights_);
+//     std::swap(random_engine_, other.random_engine_);
+// }
 
 Vocabulary::~Vocabulary() {}
 
-void Vocabulary::ComputeVocabulary(const Descriptors& descriptors) {
+void Vocabulary::ComputeVocabulary(const Descriptor::Collection& descriptors) {
     // Recursively partition the descriptors into sub-trees for each of the clusters
-    root_ = ComputeSubtree(0, descriptors);
+    tree_.ComputeTree(descriptors, kMaxDepth);
+
+    auto& data = state();
 
     // calculate scores
-    for (auto count: word_counts_) {
-        word_weights_.push_back(std::log(static_cast<double>(word_count_) / static_cast<double>(count)));
+    for (auto count: data.word_counts) {
+        data.word_weights.push_back(std::log(static_cast<double>(data.word_count) / static_cast<double>(count)));
     }
-}
-
-Vocabulary::NodePointer Vocabulary::ComputeSubtree(size_t level, const Descriptors& descriptors) {
-    if (level == kLevels || descriptors.size() < kArity) {
-        word_counts_.push_back(descriptors.size());
-        return std::make_unique<Node>(word_count_++);
-    } 
-
-    std::vector<Descriptor::Distance> min_distances;
-    min_distances.reserve(descriptors.size());
-    std::vector<size_t> assigned_cluster(descriptors.size(), 0);
-    std::vector<size_t> prefix_sum_distance;
-    std::array<size_t, kArity> cluster_center_indices;
-
-    // pick the first cluster center
-    std::uniform_int_distribution<size_t> distribution(0, descriptors.size() - 1);
-    cluster_center_indices[0] = distribution(random_engine_);
-
-    for (const auto& descriptor: descriptors) {
-        min_distances.push_back(Descriptor::ComputeDistance(*descriptors[cluster_center_indices[0]],
-                                                                   *descriptor));
-    }
-
-    // Iteratively determine the next cluster centers
-    for (size_t index = 1; index < kArity; ++index) {
-        prefix_sum_distance.clear();
-        size_t total_weight = 0;
-
-        for (auto distance: min_distances) {
-            total_weight += distance * distance;
-            prefix_sum_distance.push_back(total_weight);
-        }
-
-        std::uniform_int_distribution<size_t> distribution(0, total_weight - 1);
-
-        auto split_point = std::max(static_cast<size_t>(1), distribution(random_engine_));
-        auto split_iter = std::lower_bound(prefix_sum_distance.begin(), prefix_sum_distance.end(), split_point);
-        assert(split_iter != prefix_sum_distance.end());
-
-        size_t center_index = split_iter - prefix_sum_distance.begin();
-
-        cluster_center_indices[index] = center_index;
-
-        for (size_t descriptor_index = 0; descriptor_index != descriptors.size(); ++descriptor_index) {
-            auto new_distance = Descriptor::ComputeDistance(*descriptors[center_index],
-                                                                   *descriptors[descriptor_index]);
-
-            if (new_distance < min_distances[descriptor_index]) {
-                min_distances[descriptor_index] = new_distance;
-                assigned_cluster[descriptor_index] = index;
-            }
-        }
-    }
-
-    Children children;
-    std::array<Descriptors, kArity> partitions;
-
-    // continue refining cluster assignments until we have convergence
-    for (bool next_iteration = true; next_iteration;) {
-        next_iteration = false;
-
-        for (auto& partition: partitions) {
-            partition.clear();
-        }
-
-        for (size_t index = 0; index < descriptors.size(); ++index) {
-            partitions[assigned_cluster[index]].push_back(descriptors[index]);
-        }
-
-        for (size_t index = 0; index <kArity; ++index) {
-            children[index].centroid = Descriptor::ComputeCentroid(partitions[index]);
-        }
-
-        for (size_t index = 0; index < descriptors.size(); ++index) {
-            size_t min_distance_index = FindClosest(children, *descriptors[index]);
-
-            if (assigned_cluster[index] != min_distance_index) {
-                assigned_cluster[index] = min_distance_index;
-                next_iteration = true;
-            }
-        }
-
-    }
-
-    for (size_t child_index = 0; child_index < kArity; ++child_index) {
-        children[child_index].subtree = ComputeSubtree(level + 1, partitions[child_index]);
-    }
-
-    return std::make_unique<Node>(std::move(children));
-}
-
-size_t Vocabulary::FindClosest(const Children& subtrees, const Descriptor& descriptor) {
-    size_t min_distance_index = 0;
-    Descriptor::Distance min_distance = 
-        Descriptor::ComputeDistance(subtrees[0].centroid, descriptor);
-
-    for (size_t center_index = 1; center_index < kArity; ++center_index) {
-        Descriptor::Distance distance = 
-            Descriptor::ComputeDistance(subtrees[center_index].centroid, descriptor);
-
-        if (distance < min_distance) {
-            min_distance = distance;
-            min_distance_index = center_index;
-        }
-    }
-
-    return min_distance_index;
 }
 
 std::unique_ptr<ImageDescriptor> Vocabulary::Encode(const Descriptor::Collection& descriptors) const {
     auto result = std::make_unique<ImageDescriptor>();
+    const auto& data = state();
 
     for (const auto& descriptor: descriptors) {
         auto word = FindWord(descriptor);
         result->descriptor_.try_emplace(word, 0);
-        result->descriptor_[word] += word_weights_[word];
+        result->descriptor_[word] += data.word_weights[word];
     }
 
     // normalize the scores
@@ -187,18 +83,6 @@ std::unique_ptr<ImageDescriptor> Vocabulary::Encode(const Descriptor::Collection
     }
 
     return std::move(result);
-}
-
-const Vocabulary::Word Vocabulary::FindWord(const Descriptor& descriptor) const {
-    const Node* node = root_.get();
-
-    while (std::holds_alternative<Children>(node->node_type)) {
-        const auto& children = std::get<Children>(node->node_type);
-        auto child_index = FindClosest(children, descriptor);
-        node = children[child_index].subtree.get();
-    }
-
-    return std::get<Word>(node->node_type);
 }
 
 //
