@@ -109,8 +109,8 @@ public:
     ///
     /// \returns the collection of detected features and their description
     std::vector<KeyPoint> ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
-                                            size_t max_features = 200,
-                                            ImageLogger * logger = nullptr) const;
+                                          size_t max_features = 200,
+                                          ImageLogger * logger = nullptr) const;
 
 private:
     Parameters parameters_;

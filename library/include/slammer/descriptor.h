@@ -103,7 +103,9 @@ public:
     static Descriptor ComputeCentroid(const std::vector<const Descriptor*> descriptors);
 
     // Calculate the Hamming distance between two FeatureDescriptors
-    static Distance ComputeDistance(const Descriptor& first, const Descriptor& second);
+    static inline Distance ComputeDistance(const Descriptor& first, const Descriptor& second) {
+        return (first.descriptor_ ^ second.descriptor_).count();
+    }
 
 private:
     Descriptor(const uchar* bits);
@@ -111,6 +113,8 @@ private:
 
     Bitset descriptor_;
 };
+
+typedef std::vector<Descriptor> Descriptors;
 
 struct Empty {};
 
@@ -135,7 +139,6 @@ public:
     /// Random number generator seed
     static const int kSeed = 12345;
 
-    typedef std::vector<Descriptor> Descriptors;
     typedef std::vector<const Descriptor *> DescriptorPointers;
 
     /// the factory function object type for leaf node values
@@ -378,6 +381,58 @@ size_t DescriptorTree<LeafFunc, kArity>::FindClosest(const Children& subtrees, c
 
     return min_distance_index;
 }
+
+/// Representation of a descriptor match as determined by the Matcher class.
+struct Match {
+    /// the Hamming distance between query and target
+    Descriptor::Distance distance;
+
+    /// the index of the matched descriptor within the query set
+    size_t query_index;
+    
+    /// the index of the macthed descriptor within the target set
+    size_t target_index;
+};
+
+typedef std::vector<slammer::Match> Matches;
+
+/// For each descriptor in the query, find the descriptor in the target that
+/// is closest.
+///
+/// \param target       a collection of descriptors to macth against
+/// \param query        a collection of descriptors to match
+/// \param max_distance the maximum distance in order to consider a pair of matched descriptors
+///                     for inclusion in the result
+Matches
+ComputeMatches(const std::vector<Descriptor>& target,
+               const std::vector<Descriptor>& query,
+               Descriptor::Distance max_distance = std::numeric_limits<Descriptor::Distance>::max());
+
+/// For each descriptor in the query, find up to k closest descriptors in the target that
+/// is closest.
+///
+/// \param target       a collection of descriptors to macth against
+/// \param query        a collection of descriptors to match
+/// \param k            the number of matches to include for each descriptor
+/// \param cross_check  if true, perform a reverse check matching target descriptors to query
+///                     descriptors, and only inlcude matches contained in both runs
+/// \param max_distance the maximum distance in order to consider a pair of matched descriptors
+///                     for inclusion in the result
+std::vector<Matches> 
+ComputeKMatches(const std::vector<Descriptor>& target,
+                const std::vector<Descriptor>& query, 
+                unsigned k = 5,
+                bool cross_check = false,
+                Descriptor::Distance max_distance = std::numeric_limits<Descriptor::Distance>::max());
+
+
+/// Feature matcher employing a DistanceTree search structure
+class FlannMatcher {
+public:
+
+private:
+};
+
 
 } // namespace slammer
 

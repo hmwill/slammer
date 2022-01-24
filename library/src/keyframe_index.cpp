@@ -37,7 +37,7 @@ using namespace slammer;
 //
 
 Vocabulary::Vocabulary(): tree_(State()) {
-    Tree::Descriptors descriptors;
+    Descriptors descriptors;
     descriptors.emplace_back(Descriptor());
     tree_.ComputeTree(descriptors, kMaxDepth);
 }

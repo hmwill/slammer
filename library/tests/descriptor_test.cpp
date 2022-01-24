@@ -152,3 +152,194 @@ TEST(DescriptorTest, SearchTree) {
         EXPECT_NE(iter, leaf.end());
     }
 }
+
+namespace {
+
+template <typename Int>
+void SetBits(Descriptor& descriptor, Int bit) {
+    descriptor.Set(bit);
+}
+
+template <typename Int, typename... Ints>
+void SetBits(Descriptor& descriptor, Int bit, Ints... values) {
+    descriptor.Set(bit);
+    SetBits(descriptor, values...);
+}
+
+template <typename... Ints>
+Descriptor MakeDescriptor(Ints... values) {
+    Descriptor result;
+    SetBits(result, values...);
+    return result;
+}
+
+}
+
+TEST(DescriptorTest, ComputeMatchesNoLimit) {
+    Descriptors query, target;
+
+    target.push_back(MakeDescriptor(1, 2, 3));
+    target.push_back(MakeDescriptor(1, 2, 31, 32));
+    target.push_back(MakeDescriptor(2, 31, 32, 40, 41));
+
+    query.push_back(MakeDescriptor(1, 3, 31));
+    query.push_back(MakeDescriptor(1, 3, 31, 32));
+    query.push_back(MakeDescriptor(1, 3, 31, 32, 41));
+    query.push_back(MakeDescriptor(2, 31, 32, 41));
+
+    auto matches = ComputeMatches(target, query);
+    EXPECT_EQ(matches.size(), 4);
+
+    EXPECT_EQ(matches[0].query_index, 0);
+    EXPECT_EQ(matches[0].target_index, 0);
+    EXPECT_EQ(matches[0].distance, 2);
+
+    EXPECT_EQ(matches[1].query_index, 1);
+    EXPECT_EQ(matches[1].target_index, 1);
+    EXPECT_EQ(matches[1].distance, 2);
+
+    EXPECT_EQ(matches[2].query_index, 2);
+    EXPECT_EQ(matches[2].target_index, 1);
+    EXPECT_EQ(matches[2].distance, 3);
+
+    EXPECT_EQ(matches[3].query_index, 3);
+    EXPECT_EQ(matches[3].target_index, 2);
+    EXPECT_EQ(matches[3].distance, 1);
+}
+
+TEST(DescriptorTest, ComputeMatchesWithLimit) {
+    Descriptors query, target;
+
+    target.push_back(MakeDescriptor(1, 2, 3));
+    target.push_back(MakeDescriptor(1, 2, 31, 32));
+    target.push_back(MakeDescriptor(2, 31, 32, 40, 41));
+
+    query.push_back(MakeDescriptor(2, 31, 32, 41, 42));
+    query.push_back(MakeDescriptor(1, 3, 31));
+    query.push_back(MakeDescriptor(1, 3, 31, 32, 41));
+    query.push_back(MakeDescriptor(1, 3, 31, 32, 41));
+
+    auto matches = ComputeMatches(target, query, 2);
+    EXPECT_EQ(matches.size(), 2);
+
+    EXPECT_EQ(matches[0].query_index, 0);
+    EXPECT_EQ(matches[0].target_index, 2);
+    EXPECT_EQ(matches[0].distance, 2);
+
+    EXPECT_EQ(matches[1].query_index, 1);
+    EXPECT_EQ(matches[1].target_index, 0);
+    EXPECT_EQ(matches[1].distance, 2);
+}
+
+TEST(DescriptorTest, ComputeKMatchesNoLimit) {
+    Descriptors query, target;
+
+    target.push_back(MakeDescriptor(1, 2, 3));
+    target.push_back(MakeDescriptor(1, 2, 31, 32));
+    target.push_back(MakeDescriptor(2, 31, 32, 40, 41));
+    target.push_back(MakeDescriptor(1, 2, 5, 31, 32, 40, 41));
+
+    query.push_back(MakeDescriptor(1, 3, 31));
+    query.push_back(MakeDescriptor(1, 3, 31, 32));
+    query.push_back(MakeDescriptor(1, 3, 31, 32, 41));
+    query.push_back(MakeDescriptor(2, 31, 32, 41));
+
+    auto match_list = ComputeKMatches(target, query, 3);
+    EXPECT_EQ(match_list.size(), 4);
+
+    for (const auto& matches: match_list) {
+        EXPECT_EQ(matches.size(), 3);
+
+        // distances in ascending order
+        EXPECT_LE(matches[0].distance, matches[1].distance);
+        EXPECT_LE(matches[1].distance, matches[2].distance);
+
+        // query is the same
+        EXPECT_EQ(matches[0].query_index, matches[1].query_index);
+        EXPECT_EQ(matches[1].query_index, matches[2].query_index);
+
+        // target is distinct
+        EXPECT_NE(matches[0].target_index, matches[1].target_index);
+        EXPECT_NE(matches[1].target_index, matches[2].target_index);
+        EXPECT_NE(matches[0].target_index, matches[2].target_index);
+
+        // target index is value
+        EXPECT_LT(matches[0].target_index, target.size());
+        EXPECT_LT(matches[1].target_index, target.size());
+        EXPECT_LT(matches[2].target_index, target.size());
+    }
+}
+
+TEST(DescriptorTest, ComputeKMatchesWithLimit) {
+    Descriptors query, target;
+
+    target.push_back(MakeDescriptor(1, 2, 3));
+    target.push_back(MakeDescriptor(1, 2, 31, 32));
+    target.push_back(MakeDescriptor(2, 31, 32, 40, 41));
+    target.push_back(MakeDescriptor(1, 2, 5, 31, 32, 40, 41));
+
+    query.push_back(MakeDescriptor(1, 3, 31));
+    query.push_back(MakeDescriptor(1, 3, 31, 32));
+    query.push_back(MakeDescriptor(1, 3, 31, 32, 41));
+    query.push_back(MakeDescriptor(2, 31, 32, 41));
+
+    auto match_list = ComputeKMatches(target, query, 3, false, 2);
+    EXPECT_EQ(match_list.size(), 3);
+
+    for (size_t match_index = 0; match_index < match_list.size(); ++match_index) {
+        static const size_t match_index_size[] = { 1, 1, 2 };
+        EXPECT_EQ(match_list[match_index].size(), match_index_size[match_index]);
+
+        const auto& matches = match_list[match_index]; 
+
+        for (size_t index = 0; index < matches.size(); ++index) {
+            EXPECT_LE(matches[index].target_index, target.size());
+
+            if (index > 0) {
+                EXPECT_GE(matches[index].distance, matches[index - 1].distance);
+                EXPECT_EQ(matches[index].query_index, matches[index - 1].query_index);
+            } else {
+                EXPECT_NE(matches[index].query_index, 2);
+            }
+        }
+    }
+}
+
+
+TEST(DescriptorTest, ComputeKMatchesCrossNoLimit) {
+    Descriptors query, target;
+
+    target.push_back(MakeDescriptor(1, 3, 31));
+    target.push_back(MakeDescriptor(1, 3, 31, 32));
+    target.push_back(MakeDescriptor(1, 3, 31, 32, 41, 60, 100, 101, 102, 103, 104, 120));
+    target.push_back(MakeDescriptor(2, 31, 32, 41, 60, 100, 101, 102, 103, 104, 120));
+
+    query.push_back(MakeDescriptor(1, 2, 3, 60, 100, 101, 102, 103, 104, 120));
+    query.push_back(MakeDescriptor(1, 2, 31, 32, 100, 101, 102, 103, 104, 120));
+    query.push_back(MakeDescriptor(2, 31, 32, 40, 41));
+    query.push_back(MakeDescriptor(1, 2, 5, 31, 32, 40, 41));
+    query.push_back(MakeDescriptor(1, 2, 3));
+    query.push_back(MakeDescriptor(1, 2, 31, 32));
+    query.push_back(MakeDescriptor(2, 31, 32, 40, 41));
+    query.push_back(MakeDescriptor(1, 2, 5, 31, 32, 40, 41));
+
+
+    auto match_list = ComputeKMatches(target, query, 2, true);
+    EXPECT_EQ(match_list.size(), 4);
+
+    for (size_t match_index = 0; match_index < match_list.size(); ++match_index) {
+        const auto& matches = match_list[match_index]; 
+        static const size_t match_query_index[] = { 0, 1, 4, 5 };
+        EXPECT_EQ(match_list[match_index][0].query_index, match_query_index[match_index]);
+        EXPECT_EQ(matches.size(), 2);
+
+        for (size_t index = 0; index < matches.size(); ++index) {
+            EXPECT_LE(matches[index].target_index, target.size());
+
+            if (index > 0) {
+                EXPECT_GE(matches[index].distance, matches[index - 1].distance);
+                EXPECT_EQ(matches[index].query_index, matches[index - 1].query_index);
+            }
+        }
+    }
+}
