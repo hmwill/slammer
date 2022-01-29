@@ -44,12 +44,16 @@ using namespace slammer::orb;
 TEST(OrbTest, Basic) {
     Parameters parameters;
     Detector detector(parameters);
-    FileImageLogger logger("image_logs");
+    FileImageLogger logger("image_logs/orb_test/basic");
 
     std::string kInputPath("data/cafe1-1/color/1560004885.446172.png");
     boost::gil::rgb8_image_t input;
     boost::gil::read_image(kInputPath, input, boost::gil::png_tag{});
 
-    auto features = detector.ComputeFeatures(const_view(input), 500, &logger);
-    EXPECT_LE(features.size(), 500);
-}
+    auto features = detector.ComputeFeatures(const_view(input), 50, &logger);
+    EXPECT_LE(features.size(), 50);
+
+    for (const auto& feature: features) {
+        std::cout << "(" << feature.coords.x << ", " << feature.coords.y << ")" << std::endl;
+    }
+} 

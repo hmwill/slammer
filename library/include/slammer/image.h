@@ -39,6 +39,39 @@
 
 namespace slammer {
 
+/// Create an image pyramid for the provided image.
+///
+/// \param level_0  the original image at the root of the pyramid. 
+///                 It is moved into the element at index 0 of the result.
+/// \param scale    the scale factor between two adjacent images in the pyramid. The value
+///                 should be in the range 0 < scale < 1.
+/// \param num_levels the number of levels in the pyramid to generate
+std::vector<boost::gil::gray8_image_t> 
+CreatePyramid(boost::gil::gray8_image_t&& level_0, float scale, unsigned num_levels);
+
+/// Create an image pyramid for the provided image.
+///
+/// \param level_0  the original image at the root of the pyramid. 
+///                 It is moved into the element at index 0 of the result.
+/// \param scale    the scale factor between two adjacent images in the pyramid. The value
+///                 should be in the range 0 < scale < 1.
+/// \param num_levels the number of levels in the pyramid to generate 
+/// \param pyramid  a vector where the generated pyramid levels should be appended to
+void AppendPyramidLevels(const boost::gil::gray8c_view_t& level_0, float scale, unsigned num_levels,
+                         std::vector<boost::gil::gray8_image_t>& pyramid);
+
+/// Convert an RGB image to a grayscale image
+///
+/// Note: This function is based on an example in the Boost GIL source tree and subject 
+/// to the BOOST 1.0 license
+/// 
+/// Copyright 2019 Olzhas Zhumabek <anonymous.from.applecity@gmail.com>
+///
+/// \param original the image to convert
+///
+/// \return a grayscale image with same dimensions and resolution as the original
+boost::gil::gray8_image_t RgbToGrayscale(const boost::gil::rgb8c_view_t& original);
+
 /// Interface to allow for logging of images that are computed during the course of a
 /// computation
 class ImageLogger {

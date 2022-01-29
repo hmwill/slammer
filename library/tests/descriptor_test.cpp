@@ -323,7 +323,6 @@ TEST(DescriptorTest, ComputeKMatchesCrossNoLimit) {
     query.push_back(MakeDescriptor(2, 31, 32, 40, 41));
     query.push_back(MakeDescriptor(1, 2, 5, 31, 32, 40, 41));
 
-
     auto match_list = ComputeKMatches(target, query, 2, true);
     EXPECT_EQ(match_list.size(), 4);
 

@@ -33,7 +33,69 @@
 #include "boost/gil/io/write_view.hpp"
 #include "boost/gil/extension/io/png.hpp"
 
+#include "boost/gil/extension/numeric/sampler.hpp"
+#include "boost/gil/extension/numeric/resample.hpp"
+
 using namespace slammer;
+using namespace boost::gil;
+
+std::vector<gray8_image_t> 
+slammer::CreatePyramid(gray8_image_t&& level_0, float scale, unsigned num_levels) {
+    std::vector<gray8_image_t> result;
+    result.emplace_back(std::move(level_0));
+    AppendPyramidLevels(const_view(result[0]), scale, num_levels, result);
+    return result;
+}
+
+void 
+slammer::AppendPyramidLevels(const boost::gil::gray8c_view_t& level_0, float scale, unsigned num_levels,
+                             std::vector<boost::gil::gray8_image_t>& pyramid) {
+
+    gray8c_view_t image = level_0;
+
+    for (unsigned level = 0; level < num_levels; ++level) {
+        auto dimensions = point_t(image.width() * scale, image.height() * scale);
+        gray8_image_t new_image(dimensions);
+        boost::gil::resize_view(image, view(new_image), boost::gil::bilinear_sampler{});
+        pyramid.emplace_back(std::move(new_image));
+        image = const_view(pyramid.back());
+    }
+}
+
+boost::gil::gray8_image_t 
+slammer::RgbToGrayscale(const boost::gil::rgb8c_view_t& original) {
+    boost::gil::gray8_image_t output_image(original.dimensions());
+    auto output = boost::gil::view(output_image);
+
+    boost::gil::transform_pixels(original, output, [&](const auto& pixel) {
+        constexpr float max_channel_intensity = std::numeric_limits<std::uint8_t>::max();
+        constexpr float inv_max_channel_intensity = 1.0f / max_channel_intensity;
+
+        const std::integral_constant<int, 0> kRed;
+        const std::integral_constant<int, 1> kGreen;
+        const std::integral_constant<int, 2> kBlue;
+
+        // scale the values into range [0, 1] and calculate linear intensity
+        auto linear_luminosity =
+            (0.2126f * inv_max_channel_intensity) * pixel.at(kRed) + 
+            (0.7152f * inv_max_channel_intensity) * pixel.at(kGreen) + 
+            (0.0722f * inv_max_channel_intensity) * pixel.at(kBlue);
+
+        // perform gamma adjustment
+        float gamma_compressed_luminosity = 0;
+
+        if (linear_luminosity < 0.0031308f) {
+            gamma_compressed_luminosity = linear_luminosity * 12.92f;
+        } else {
+            gamma_compressed_luminosity = 1.055f * std::powf(linear_luminosity, 1 / 2.4f) - 0.055f;
+        }
+
+        // since now it is scaled, descale it back
+        return gamma_compressed_luminosity * max_channel_intensity;
+    });
+
+    return output_image;
+}
 
 void 
 FileImageLogger::LogImage(const boost::gil::gray8c_view_t image, 

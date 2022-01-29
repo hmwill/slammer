@@ -425,15 +425,6 @@ ComputeKMatches(const std::vector<Descriptor>& target,
                 bool cross_check = false,
                 Descriptor::Distance max_distance = std::numeric_limits<Descriptor::Distance>::max());
 
-
-/// Feature matcher employing a DistanceTree search structure
-class FlannMatcher {
-public:
-
-private:
-};
-
-
 } // namespace slammer
 
 #endif //ndef SLAMMER_DESCRIPTOR_H
