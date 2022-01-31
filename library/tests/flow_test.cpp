@@ -71,6 +71,10 @@ void LogFeatures(ImageLogger& logger, const std::string& name, const gray8c_view
     }
 
     for (auto point: points) {
+        if (isnan(point.x) || isnan(point.y)) {
+            continue;
+        }
+        
         output(point.x, point.y) = red;
         output(point.x - 3, point.y) = red;
         output(point.x - 2, point.y) = red;
@@ -108,17 +112,8 @@ TEST(FlowTest, SimpleTest) {
     ASSERT_EQ(source_input.width(), 848);
     ASSERT_EQ(source_input.height(), 480);
 
-    float sigma = 1.0f;
-    size_t window = static_cast<size_t>(roundf(sigma * 3)) * 2 + 1;
-    auto smoothing_kernel = generate_gaussian_kernel(window, sigma);
-
-    auto source_gray = RgbToGrayscale(const_view(source_input));
-    gray8_image_t source(source_gray.dimensions());
-    detail::convolve_2d(const_view(source_gray), smoothing_kernel, view(source));
-
-    auto target_gray = RgbToGrayscale(const_view(target_input));
-    gray8_image_t target(target_gray.dimensions());
-    detail::convolve_2d(const_view(target_gray), smoothing_kernel, view(target));
+    auto source = RgbToGrayscale(const_view(source_input));
+    auto target = RgbToGrayscale(const_view(target_input));
 
     std::vector<Point2f> source_points = {
         Point2f(372, 232),         Point2f(368, 240),
@@ -160,7 +155,7 @@ TEST(FlowTest, SimpleTest) {
 
     if (true) {
         FileImageLogger logger("image_logs/flow_test/simple_test");
-        LogFeatures(logger, "Input", const_view(source_gray), source_points);
-        LogFeatures(logger, "Output", const_view(target_gray), target_points, &source_points);
+        LogFeatures(logger, "Input", const_view(source), source_points);
+        LogFeatures(logger, "Output", const_view(target), target_points, &source_points);
     }
 }

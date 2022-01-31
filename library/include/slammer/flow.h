@@ -51,13 +51,13 @@ namespace slammer {
 ///                                 the target point locations. Otherwise, initialization is done using
 ///                                 source coordinates.
 /// \param [out] error              the error value associated with the results, which can be used to exclude bad 
-///                                 matches.
+///                                 matches. 
 /// \param num_levels               number of levels to generate for the imge pyramid
 /// \param omega                    half-size of window width (window is [-omega .. omega])
 /// \param threshold                convergence threshold
 void ComputeFlow(const boost::gil::gray8c_view_t& source, const boost::gil::gray8c_view_t& target,
                  const std::vector<Point2f>& source_points, std::vector<Point2f>& target_points,
-                 std::vector<float>& error, unsigned num_levels = 4, unsigned omega = 3, float threshold = 0.25f);
+                 std::vector<float>& error, unsigned num_levels = 4, unsigned omega = 7, float threshold = 0.5f);
 
 } // namespace slammer
 
