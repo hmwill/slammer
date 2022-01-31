@@ -124,7 +124,7 @@ TEST(FlowTest, SimpleTest) {
         Point2f(704, 324),         Point2f(356, 292),
         Point2f(404, 148),         Point2f(610, 234),
         Point2f(652, 104),         Point2f(418.607, 237.588),
-        Point2f(608.112, 76.3675), Point2f(352, 272),
+        /*Point2f(608.112, 76.3675),*/ Point2f(352, 272),
         Point2f(316, 244),         Point2f(370, 300),
         Point2f(292, 276),         Point2f(358, 300),
         Point2f(328, 168),         Point2f(684, 112),

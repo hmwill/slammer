@@ -39,7 +39,7 @@ using namespace slammer;
 
 using namespace boost::gil;
 
-#define AFFINE_VERSION 1
+#define AFFINE_VERSION 0
 
 namespace {
 
@@ -244,16 +244,19 @@ slammer::ComputeFlow(const gray8c_view_t& source, const gray8c_view_t& target,
             const auto& source = view_source_pyramid[level];
             const auto& target = view_target_pyramid[level];
 
+            // For testing the center of the square sampling region around the original feature point 
             float border = MinimumBorder(omega);
             Rect2f valid_region(Vec2(border, border), 
                                 Dimension2f(source.width() - 2 * border, source.height() - 2 * border));
-            Rect2f image_region(Vec2(0, 0), Dimension2f(source.width() - 1, source.height() - 1));
 
+            // If the original feature point is too close to the boundary of the image, skip the iteration
+            // at this level
             if (!valid_region.Contains(x)) {
-                err = std::numeric_limits<float>::quiet_NaN();
-                v = Vec2(std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN());
-                break;
+                continue;
             }
+
+            // For testing the corners of sampling region of the target point
+            Rect2f image_region(Vec2(0, 0), Dimension2f(source.width() - 1, source.height() - 1));
 
             Lhs G = CalculateG(image_dx, image_dy, x, omega);
             Eigen::LLT<decltype(G)> decomposition(G);
@@ -276,14 +279,19 @@ slammer::ComputeFlow(const gray8c_view_t& source, const gray8c_view_t& target,
                 Rhs diff = CalcDiff(source, target, image_dx, image_dy, A, v, x, omega);
                 Rhs step = decomposition.solve(diff);
 
-                auto previous_err = err;
                 Vec2 eta_xy(step[0], step[1]);
-                err = eta_xy.squaredNorm();
+                auto new_err = eta_xy.squaredNorm();
 
-                if (err >= previous_err || err < threshold * threshold) {
+                if (new_err >= err) {
                     break;
                 }
 
+                err = new_err;
+
+                if (err < threshold * threshold) {
+                    break;
+                }
+                
                 v += A * eta_xy;
 
 #if AFFINE_VERSION
