@@ -39,6 +39,15 @@ using namespace slammer;
 
 using namespace boost::gil;
 
+// The implementation here is based on the paper
+//
+// Bouguet, Jean-Yves (2001). “Pyramidal Implementation of the Affine Lucas Kanade Feature Tracker;  
+// Description of the Algorithm.” http://robots.stanford.edu/cs223b04/algo_affine_tracking.pdf.
+//
+// Flag to switch between a regular translation-based version of Lucas Kanade or the affine version
+// described in the reference cited above. If the affine version is used, one may want to select a larger
+// window size (omega parameter) for computing errors and derivatives. The paper recommends a value of 7
+// or higher.
 #define AFFINE_VERSION 0
 
 namespace {
