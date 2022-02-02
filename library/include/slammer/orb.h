@@ -35,7 +35,6 @@
 
 #include "slammer/slammer.h"
 
-#include "slammer/bitmap.h"
 #include "slammer/descriptor.h"
 #include "slammer/image.h"
 
@@ -107,12 +106,14 @@ public:
     /// \param max_features the maximum number of features to return
     /// \param result       container to receive the collection of detected features
     /// \param descriptors  if not nullptr, receives the feature descriptors
+    /// \param feature_mask an optional image map that serves as stencil for feature selection
     ///
     /// \returns the number of detected features
     size_t ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
                            size_t max_features, 
                            std::vector<KeyPoint>& result,
                            Descriptors* descriptors = nullptr,
+                           const boost::gil::gray8c_view_t* feature_mask = nullptr,
                            ImageLogger * logger = nullptr) const;
 
 private:

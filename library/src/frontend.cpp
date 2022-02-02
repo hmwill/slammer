@@ -307,19 +307,30 @@ size_t RgbdFrontend::DetectKeyframeFeatures() {
 
 size_t RgbdFrontend::DetectAdditionalFeatures(size_t num_additonal) {
     using std::begin, std::end;
+    using namespace boost::gil;
 
-    Point2f offset(parameters_.orb_parameters.min_distance, parameters_.orb_parameters.min_distance);
-    Bitmap feature_mask(current_frame_data_.rgb->width(), current_frame_data_.rgb->height());
+    gray8_image_t feature_mask(current_frame_data_.rgb->width(), current_frame_data_.rgb->height());
+    auto mask = view(feature_mask); 
+    const auto kFillValue = gray8_pixel_t(std::numeric_limits<gray8_pixel_t::value_type>::max());
 
     for (const auto &point: tracked_features_) {
-        //cv::rectangle(feature_mask, point - offset, point + offset, 0, cv::FILLED);
-        // TODO: Implement rendering of square to Bitmap
-        assert(false);
+        int x_min = std::max(ptrdiff_t(floorf(point.x)) - parameters_.orb_parameters.min_distance, (ptrdiff_t) 0);
+        int x_max = std::min(ptrdiff_t(floorf(point.x)) + parameters_.orb_parameters.min_distance + 1, mask.width());
+        int y_min = std::max(ptrdiff_t(floorf(point.y)) - parameters_.orb_parameters.min_distance, (ptrdiff_t) 0);
+        int y_max = std::min(ptrdiff_t(floorf(point.y)) + parameters_.orb_parameters.min_distance + 1, mask.height());
+
+        for (auto y = y_min; y < y_max; ++y) {
+            for (auto x = x_min; x < x_max; ++x) {
+                mask(x, y) = kFillValue;
+            }
+        }
     }
 
     KeyPoints additional_points;
+    auto const_mask = const_view(feature_mask);
+
     feature_detector_.ComputeFeatures(const_view(*current_frame_data_.rgb), 
-                                      parameters_.num_features, additional_points);
+                                      parameters_.num_features, additional_points, nullptr, &const_mask);
         
     if (additional_points.size() > num_additonal) {
         additional_points.resize(num_additonal);

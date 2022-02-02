@@ -55,14 +55,9 @@ namespace {
 gray32f_image_t ComputeDx(const gray8c_view_t& image) {
     gray32f_image_t result(image.dimensions());
 
-#if 0    
-    static auto kernel_dx = generate_dx_sobel<float>();
-    detail::convolve_2d(image, kernel_dx, view(result));
-#else
     static const float params[] = { -0.5f, 0.0f, 0.5f };
     kernel_1d_fixed<float, 3> dx(params, 1);
     correlate_rows_fixed<gray32f_pixel_t>(image, dx, view(result));
-#endif
 
     return result;
 }
@@ -70,14 +65,9 @@ gray32f_image_t ComputeDx(const gray8c_view_t& image) {
 gray32f_image_t ComputeDy(const gray8c_view_t& image) {
     gray32f_image_t result(image.dimensions());
 
-#if 0
-    static auto kernel_dy = boost::gil::generate_dy_sobel<float>();
-    detail::convolve_2d(image, kernel_dy, view(result);
-#else
     static const float params[] = { -0.5f, 0.0f, 0.5f };
     kernel_1d_fixed<float, 3> dy(params, 1);
     correlate_cols_fixed<gray32f_pixel_t>(image, dy, view(result));
-#endif
 
     return result;
 }

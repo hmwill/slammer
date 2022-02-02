@@ -52,7 +52,7 @@ TEST(OrbTest, Basic) {
 
     std::vector<KeyPoint> features;
     Descriptors descriptors;
-    size_t num_features = detector.ComputeFeatures(const_view(input), 50, features, &descriptors, &logger);
+    size_t num_features = detector.ComputeFeatures(const_view(input), 50, features, &descriptors, nullptr, &logger);
     EXPECT_EQ(features.size(), num_features);
     EXPECT_LE(features.size(), 50);
 

@@ -32,6 +32,9 @@
 
 #include "slammer/utility.h"
 
+#include "boost/gil/extension/numeric/sampler.hpp"
+#include "boost/gil/extension/numeric/resample.hpp"
+
 using namespace slammer;
 using namespace slammer::orb;
 
@@ -417,6 +420,7 @@ Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original,
                           size_t max_features, 
                           std::vector<KeyPoint>& result,
                           Descriptors* descriptors,
+                          const boost::gil::gray8c_view_t* feature_mask,
                           ImageLogger * logger) const {    
     result.clear();
 
@@ -516,7 +520,12 @@ Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original,
     size_t mask_width = ceilf(original.width() * inv_grid_size);
     size_t mask_height = ceilf(original.height() * inv_grid_size);
 
-    Bitmap mask(mask_width, mask_height);
+    gray8_image_t mask_image(mask_width, mask_height);
+    auto mask = view(mask_image); 
+
+    if (feature_mask) {
+        boost::gil::resize_view(*feature_mask, mask, boost::gil::bilinear_sampler{});
+    }
 
     // Select the top N features and create the result
     for (const auto& feature: candidates) {
@@ -528,7 +537,7 @@ Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original,
         Point2f coord(feature.coords.x * scale, feature.coords.y * scale);
         int x = floorf(coord.x * inv_grid_size), y = floorf(coord.y * inv_grid_size);
 
-        if (mask.Get(x, y)) {
+        if (mask.at(x, y)[0]) {
             continue;
         }
 
@@ -536,16 +545,17 @@ Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original,
         int x_right = std::min((int) mask_width - 1, x + 1);
         int y_up = std::max(0, y - 1);
         int y_down = std::min((int) mask_height - 1, y + 1);
+        const auto kFillValue = gray8_pixel_t(std::numeric_limits<gray8_pixel_t::value_type>::max());
 
-        mask.Set(x, y);
-        mask.Set(x_left, y);
-        mask.Set(x_right, y);
-        mask.Set(x, y_up);
-        mask.Set(x_left, y_up);
-        mask.Set(x_right, y_up);
-        mask.Set(x, y_down);
-        mask.Set(x_left, y_down);
-        mask.Set(x_right, y_down);
+        mask(x, y) = kFillValue;
+        mask(x_left, y) = kFillValue;
+        mask(x_right, y) = kFillValue;
+        mask(x, y_up) = kFillValue;
+        mask(x_left, y_up) = kFillValue;
+        mask(x_right, y_up) = kFillValue;
+        mask(x, y_down) = kFillValue;
+        mask(x_left, y_down) = kFillValue;
+        mask(x_right, y_down) = kFillValue;
 
         auto image = const_view(pyramid[feature.level]);
         float angle = CalculateOrientation(image, feature.coords, parameters_.window_size/2);
