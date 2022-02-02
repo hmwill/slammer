@@ -55,9 +55,9 @@ public:
 
     // We are using a dynamic bitset from the boost library until we have descriptor extraction
     // converted from not using OpenCV Mat types anymore.
-    using Bitset = boost::dynamic_bitset<uint64_t>;
+    using Bitset = std::bitset<kNumBits>;
 
-    Descriptor(): descriptor_(kNumBits) {}
+    Descriptor() {}
 
     /// Set a specified descriptor bit
     ///
@@ -72,24 +72,6 @@ public:
     /// \param index the index of the descriptor bit
     bool Get(unsigned index) const {
         return descriptor_[index];
-    }
-
-    /// Ceate a feature descriptor based on the contents of a row in the given OpenCV matrix.
-    /// The Matrix is expected to have elements of type CV_8UC1 and to have 32 columns.
-    static Descriptor From(const cv::Mat& mat, int row)  {
-        return Descriptor(mat.ptr(row));
-    }   
-
-    /// Ceate a feature descriptor based on the contents of all the rows in the given OpenCV matrix.
-    /// The Matrix is expected to have elements of type CV_8UC1 and to have 32 columns.
-    static Collection From(const cv::Mat& mat) {
-        Collection result;
-
-        for (int index = 0; index < mat.rows; ++index) {
-            result.emplace_back(From(mat, index));
-        }
-
-        return result;
     }
 
     static void IntoPointerVector(const Collection& descriptors,
@@ -108,7 +90,6 @@ public:
     }
 
 private:
-    Descriptor(const uchar* bits);
     Descriptor(Bitset&& descriptor): descriptor_(descriptor) {}
 
     Bitset descriptor_;

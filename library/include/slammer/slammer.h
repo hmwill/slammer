@@ -56,8 +56,6 @@
 #include <unordered_set>
 #include <variant>
 
-#include "boost/dynamic_bitset.hpp"
-
 #include "opencv2/opencv.hpp"
 
 #include "Eigen/Core" 

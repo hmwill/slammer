@@ -123,7 +123,7 @@ KeyframeIndex::~KeyframeIndex() {}
 
 void KeyframeIndex::Insert(const KeyframePointer& keyframe) {
     if (!keyframe->descriptor) {
-        keyframe->descriptor = vocabulary_.Encode(Descriptor::From(keyframe->descriptions));
+        keyframe->descriptor = vocabulary_.Encode(keyframe->descriptions);
     }
 
     assert(reverse_index_.find(keyframe) == reverse_index_.end());
@@ -164,7 +164,7 @@ void KeyframeIndex::Delete(const KeyframePointer& keyframe) {
 void KeyframeIndex::Search(const KeyframePointer& query, std::vector<Result>& results,
                            size_t max_results) const {
     if (!query->descriptor) {
-        query->descriptor = vocabulary_.Encode(Descriptor::From(query->descriptions));
+        query->descriptor = vocabulary_.Encode(query->descriptions);
     }
 
     absl::btree_set<RowIndex> excluded_rows;

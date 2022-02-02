@@ -55,12 +55,14 @@ KeyframePointer Map::CreateKeyframe(const RgbdFrameEvent& event) {
     result->pose = event.pose;
     result->pinned = false;
     
+    auto depth_image = boost::gil::const_view(*event.frame_data.depth);
+
     for (const auto& keypoint: event.keypoints) {
         auto feature = std::make_shared<Feature>();
 
         feature->keypoint = keypoint;
         feature->depth = //std::numeric_limits<double>::signaling_NaN();
-            static_cast<double>(event.frame_data.depth.at<ushort>(keypoint.pt.y, keypoint.pt.x));
+            static_cast<double>(depth_image.at(keypoint.coords.x, keypoint.coords.y)[0]);
 
         feature->keyframe = result;
 
@@ -104,7 +106,7 @@ void Map::CreateLandmarksForUnmappedFeatures(const Camera& camera, const Keyfram
 LandmarkId Map::CreateLandmark(const Camera& camera, const FeaturePointer& feature) {
     auto keyframe = feature->keyframe.lock();
     // TODO: how to get the coordinates
-    Point3d coord = camera.PixelToCamera(feature->keypoint.pt, feature->depth);
+    Point3d coord = camera.PixelToCamera(feature->keypoint.coords, feature->depth);
     Point3d location = keyframe->pose * coord;
 
     auto landmark = std::make_shared<Landmark>();

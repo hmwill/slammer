@@ -39,14 +39,15 @@
 
 #include "slammer/camera.h"
 #include "slammer/events.h"
+#include "slammer/orb.h"
 
 namespace slammer {
 
 /// Representation of the camera data that is processed by the RGBD frontend. It comprises a color and a depth
 /// image, each with an associated timestamp.
 struct RgbdFrameData {
-    cv::Mat rgb;
-    cv::Mat depth;
+    ColorImage rgb;
+    DepthImage depth;
 
     Timestamp time_rgb;
     Timestamp time_depth;
@@ -63,10 +64,10 @@ struct RgbdFrameEvent: public Event {
     Sophus::SE3d pose;
 
     // Locations of feature points within the image (relative to left RGB)
-    std::vector<cv::KeyPoint> keypoints;
+    std::vector<orb::KeyPoint> keypoints;
 
-    // Feature descriptions
-    cv::Mat descriptions;
+    // Descriptors associated with the feature points
+    Descriptors descriptions;
 
     // Frame data
     RgbdFrameData frame_data;
@@ -91,26 +92,19 @@ class RgbdFrontend {
 public:
     /// Configuration parameters and their defaults
     struct Parameters {
-        // number of pixels around existing feature to exclude during feature detection
-        int feature_mask_size = 10;
-
-        // parameter for feature detector
-        double quality_level = 0.01;
-
-        // spacing requirement for feature detector
-        double min_distance = 20.0;
+        orb::Parameters orb_parameters;
 
         // max iterations for optical flow calculation
         int flow_iterations_max = 30;
 
         // error threshold for optical flow calculation
-        double flow_threshold = 0.01;
+        double flow_threshold = 0.5;
 
-        // the window size around each feature to use for optical flow calculation
-        int flow_window_size = 11;
+        // the half-window size around each feature to use for optical flow calculation
+        int flow_omega = 3;
 
         // the number of mimap levels to generate for optical flow calculation
-        int flow_pyramid_levels = 3;
+        int flow_pyramid_levels = 4;
 
         // ICP iteration limit
         size_t max_iterations = 30;
@@ -169,8 +163,8 @@ public:
 
     const Parameters& parameters() const { return parameters_; }
 
-    void HandleColorEvent(const ImageEvent& event);
-    void HandleDepthEvent(const ImageEvent& event);
+    void HandleColorEvent(const ColorImageEvent& event);
+    void HandleDepthEvent(const DepthImageEvent& event);
 
     /// Downstream modules subscribe here for notification when a new keyframe is available.
     /// Processing time should be minimal or move to a separate thread.
@@ -187,7 +181,7 @@ public:
     void HandleKeyframePoseEvent(const KeyframePoseEvent& event);
 
 private:
-    using KeyPoints = std::vector<cv::KeyPoint>;
+    using KeyPoints = std::vector<orb::KeyPoint>;
     struct KeyframePoseUpdate {
         Timestamp timestamp;
         SE3d previous_pose;
@@ -274,6 +268,9 @@ private:
     /// Keypoints/features tracked
     KeyPoints key_points_;
 
+    /// Associated feature descriptors
+    Descriptors descriptors_;
+
     /// Keypoints/features tracked
     std::vector<Point2f> tracked_features_;
 
@@ -287,7 +284,7 @@ private:
     Sophus::SE3d::Tangent relative_motion_twist_;
     
     /// Feature detector
-    cv::Ptr<cv::FeatureDetector> feature_detector_;
+    orb::Detector feature_detector_;
 
     /// Random number generator to use
     std::default_random_engine random_engine_;

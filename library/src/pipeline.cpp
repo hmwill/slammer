@@ -38,8 +38,8 @@ Pipeline::Pipeline(const RgbdFrontend::Parameters& frontend_parameters,
                    const Backend::Parameters& backend_parameters,
                    Vocabulary&& vocabulary, 
                    Camera&& rgb_camera, Camera&& depth_camera,
-                   EventListenerList<ImageEvent>& color_source,
-                   EventListenerList<ImageEvent>& depth_source)
+                   EventListenerList<ColorImageEvent>& color_source,
+                   EventListenerList<DepthImageEvent>& depth_source)
     :   rgb_camera_(std::move(rgb_camera)),
         depth_camera_(std::move(depth_camera)),
         frontend_(frontend_parameters, rgb_camera_, depth_camera_),

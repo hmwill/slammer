@@ -28,35 +28,43 @@
 // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include <stdexcept>
+#ifndef SLAMMER_BITMAP_H
+#define SLAMMER_BITMAP_H
 
-#include <gtest/gtest.h>
+#pragma once
 
-#include "slammer/orb.h"
+#include "slammer/slammer.h"
 
-#include "boost/gil/extension/io/png.hpp"
+namespace slammer {
 
+/// Simple 2-dimensional bitmap type that can be used for masking of image operations.
+class Bitmap {
+public:
+    Bitmap(size_t width, size_t height)
+        : width_(width), height_(height), bits_(width * height) {}
 
-using namespace slammer;
-using namespace slammer::orb;
-
-
-TEST(OrbTest, Basic) {
-    Parameters parameters;
-    Detector detector(parameters);
-    FileImageLogger logger("image_logs/orb_test/basic");
-
-    std::string kInputPath("data/cafe1-1/color/1560004885.446172.png");
-    boost::gil::rgb8_image_t input;
-    boost::gil::read_image(kInputPath, input, boost::gil::png_tag{});
-
-    std::vector<KeyPoint> features;
-    Descriptors descriptors;
-    size_t num_features = detector.ComputeFeatures(const_view(input), 50, features, &descriptors, &logger);
-    EXPECT_EQ(features.size(), num_features);
-    EXPECT_LE(features.size(), 50);
-
-    for (const auto& feature: features) {
-        std::cout << "(" << feature.coords.x << ", " << feature.coords.y << ")" << std::endl;
+    void Clear() {
+        std::fill(bits_.begin(), bits_.end(), false);
     }
-} 
+
+    void Set(size_t x, size_t y, bool value = true) {
+        size_t index = x + y * width_;
+        bits_[index] = value;
+    }
+
+    bool Get(size_t x, size_t y) const {
+        size_t index = x + y * width_;
+        return bits_[index];
+    }
+
+    size_t width() const { return width_; }
+    size_t height() const { return height_; }
+
+private:
+    size_t width_, height_;
+    std::vector<bool> bits_;
+};
+
+} // namespace slammer
+
+#endif //ndef SLAMMER_BITMAP_H

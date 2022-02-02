@@ -31,6 +31,7 @@
 #include "slammer/frontend.h"
 
 #include "slammer/events.h"
+#include "slammer/flow.h"
 #include "slammer/math.h"
 #include "slammer/backend.h"
 
@@ -44,7 +45,7 @@ static constexpr double kDepthScale = 0.001;
 
 inline double DepthForPixel(const RgbdFrameData& frame, Point2f point) {
     float column = point.x, row = point.y; 
-    auto depth = frame.depth.at<ushort>(floorf(row), floorf(column));
+    auto depth = const_view(*frame.depth).at(floorf(column), floorf(row))[0];
 
     // 0 depth represents a missing depth value, so we convert those to an NaN value instead
     return depth ? kDepthScale * depth : std::numeric_limits<double>::signaling_NaN();
@@ -100,12 +101,9 @@ void MaskNaN(const std::vector<Point3d>& points, std::vector<uchar>& mask) {
 
 RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera), 
+      feature_detector_(parameters.orb_parameters),
       status_(Status::kInitializing), random_engine_(parameters.seed), trigger_(Trigger::kTriggerColor),
-      distance_since_last_keyframe_(0.0), skip_count_(0) {
-    feature_detector_ = 
-        //cv::GFTTDetector::create(parameters.num_features, parameters.quality_level, parameters.min_distance);
-        cv::ORB::create(parameters_.num_features);
-}
+      distance_since_last_keyframe_(0.0), skip_count_(0) {}
 
 void RgbdFrontend::ClearFeatureVectors() {
     tracked_features_.clear();
@@ -124,15 +122,14 @@ void RgbdFrontend::PostKeyframe() {
     event.keypoints = key_points_;
     event.info.rgb = &rgb_camera_;
     event.info.depth = &depth_camera_;
-
-    feature_detector_->compute(current_frame_data_.rgb, event.keypoints, event.descriptions);
+    event.descriptions = std::move(descriptors_);
 
     keyframes.HandleEvent(event);
 
     distance_since_last_keyframe_ = 0.0;
 }
 
-void RgbdFrontend::HandleColorEvent(const ImageEvent& event) {
+void RgbdFrontend::HandleColorEvent(const ColorImageEvent& event) {
     current_frame_data_.time_rgb = event.timestamp;
     current_frame_data_.rgb = event.image;
 
@@ -141,7 +138,7 @@ void RgbdFrontend::HandleColorEvent(const ImageEvent& event) {
     }
 }
 
-void RgbdFrontend::HandleDepthEvent(const ImageEvent& event) {
+void RgbdFrontend::HandleDepthEvent(const DepthImageEvent& event) {
     current_frame_data_.time_depth = event.timestamp;
     current_frame_data_.depth = event.image;
 
@@ -161,7 +158,7 @@ void RgbdFrontend::HandleKeyframePoseEvent(const KeyframePoseEvent& event) {
 
 void RgbdFrontend::ProcessFrame() {
     // Haven't received enough information yet; skip processing
-    if (current_frame_data_.rgb.empty() || current_frame_data_.depth.empty())
+    if (!current_frame_data_.rgb || !current_frame_data_.depth)
         return;
 
     if (skip_count_) {
@@ -292,14 +289,17 @@ void RgbdFrontend::ProcessFrame() {
 size_t RgbdFrontend::DetectKeyframeFeatures() {
     using std::begin, std::end;
 
-    feature_detector_->detect(current_frame_data_.rgb, key_points_);
+    feature_detector_.ComputeFeatures(const_view(*current_frame_data_.rgb), 
+                                        parameters_.num_features, key_points_, &descriptors_);
 
     // add new features to tracked feature set
-    cv::KeyPoint::convert(key_points_, tracked_features_);
+    tracked_features_.clear();
+    std::transform(key_points_.begin(), key_points_.end(), std::back_inserter(tracked_features_),
+                   [](const auto& keypoint) { return keypoint.coords; });
 
     for (const auto& point: key_points_) {
-        auto z = DepthForPixel(current_frame_data_, point.pt);
-        tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.pt, z));
+        auto z = DepthForPixel(current_frame_data_, point.coords);
+        tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
     }    
 
     return tracked_features_.size();
@@ -308,24 +308,27 @@ size_t RgbdFrontend::DetectKeyframeFeatures() {
 size_t RgbdFrontend::DetectAdditionalFeatures(size_t num_additonal) {
     using std::begin, std::end;
 
-    Point2f offset(parameters_.feature_mask_size, parameters_.feature_mask_size);
-    cv::Mat feature_mask(current_frame_data_.rgb.size(), CV_8UC1, 255);
+    Point2f offset(parameters_.orb_parameters.min_distance, parameters_.orb_parameters.min_distance);
+    Bitmap feature_mask(current_frame_data_.rgb->width(), current_frame_data_.rgb->height());
 
     for (const auto &point: tracked_features_) {
-        cv::rectangle(feature_mask, point - offset, point + offset, 0, cv::FILLED);
+        //cv::rectangle(feature_mask, point - offset, point + offset, 0, cv::FILLED);
+        // TODO: Implement rendering of square to Bitmap
+        assert(false);
     }
 
-    std::vector<cv::KeyPoint> additional_points;
-    feature_detector_->detect(current_frame_data_.rgb, additional_points, feature_mask);
-
+    KeyPoints additional_points;
+    feature_detector_.ComputeFeatures(const_view(*current_frame_data_.rgb), 
+                                      parameters_.num_features, additional_points);
+        
     if (additional_points.size() > num_additonal) {
         additional_points.resize(num_additonal);
     }
 
     for (const auto& point: additional_points) {
-        auto z = DepthForPixel(current_frame_data_, point.pt);
-        tracked_features_.push_back(point.pt);
-        tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.pt, z));
+        auto z = DepthForPixel(current_frame_data_, point.coords);
+        tracked_features_.push_back(point.coords);
+        tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
     }    
 
     return tracked_features_.size();
@@ -344,27 +347,21 @@ size_t RgbdFrontend::FindFeaturesInCurrent(std::vector<Point2f>& current_points)
         current_points = tracked_features_;
     }
 
-    cv::Mat error;
-    cv::TermCriteria termination_criteria {
-        cv::TermCriteria::COUNT + cv::TermCriteria::EPS, 
-        parameters_.flow_iterations_max, 
-        parameters_.flow_threshold
-    };
+    std::vector<float> error;
 
-    cv::Size window(parameters_.flow_window_size, parameters_.flow_window_size);
+    // TODO: Refactor this such that the same conversion can be used for feature detection
+    auto source = RgbToGrayscale(const_view(*previous_frame_data_.rgb));
+    auto target = RgbToGrayscale(const_view(*current_frame_data_.rgb));
+
+    ComputeFlow(const_view(source), const_view(target),
+                tracked_features_, current_points, error,
+                parameters_.flow_pyramid_levels, parameters_.flow_omega, parameters_.flow_threshold);
+
+    float squared_error = parameters_.flow_threshold * parameters_.flow_threshold;
+
     std::vector<uchar> mask;
-
-    cv::calcOpticalFlowPyrLK(previous_frame_data_.rgb, current_frame_data_.rgb, 
-                             tracked_features_, current_points, 
-                             mask, error, window, parameters_.flow_pyramid_levels,
-                             termination_criteria, cv::OPTFLOW_USE_INITIAL_FLOW);
-
-    for (size_t index = 0; index < current_points.size(); ++index) {
-        if (current_points[index].x < 0 || current_points[index].y < 0 ||
-            current_points[index].x >= rgb_camera_.width() || current_points[index].y >= rgb_camera_.height()) {
-            mask[index] = 0;
-        }
-    }
+    std::transform(error.begin(), error.end(), std::back_inserter(mask),
+                   [=](float err) { return err <= squared_error; });
 
     Compress(tracked_features_, mask);
     Compress(tracked_feature_coords_, mask);

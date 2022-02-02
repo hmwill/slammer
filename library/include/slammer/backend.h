@@ -115,13 +115,13 @@ private:
     using LandmarkMapping = std::unordered_map<LandmarkId, LandmarkId>;
 
     /// Feature matches that anchor two frames relative to each other
-    using FeatureMatches = std::vector<cv::DMatch>;
+    using FeatureMatches = std::vector<Match>;
 
     /// Match features from a new frame against features in a given reference frame.
     ///
     /// \param reference    Feature descriptors associated with the referene frames
     /// \param query        Feature descriptors associated with the query frame
-    FeatureMatches MatchFeatures(const cv::Mat& reference, const cv::Mat& query);
+    FeatureMatches MatchFeatures(const Descriptors& reference, const Descriptors& query);
 
     /// Insert a keyframe into the overall graph relative to the given refernce frame.
     ///
@@ -218,9 +218,6 @@ private:
 
     /// The keyframe index
     KeyframeIndex& keyframe_index_;
-
-    /// Feature matcher
-    cv::BFMatcher matcher_;
 
     /// Random number generator to use
     std::default_random_engine random_engine_;

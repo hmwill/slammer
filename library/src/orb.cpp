@@ -390,35 +390,6 @@ inline float ComputeHarrisScore(const gray8c_view_t& image, Point2i coords,
     return static_cast<float>(det - k * trace);
 }
 
-/// Simple 2-dimensional bitmap type that can be used space (and cache-efficient) masking
-/// of image operations.
-class Bitmap {
-public:
-    Bitmap(size_t width, size_t height)
-        : width_(width), height_(height), bits_(width * height) {}
-
-    void Clear() {
-        std::fill(bits_.begin(), bits_.end(), false);
-    }
-
-    void Set(size_t x, size_t y, bool value = true) {
-        size_t index = x + y * width_;
-        bits_[index] = value;
-    }
-
-    bool Get(size_t x, size_t y) const {
-        size_t index = x + y * width_;
-        return bits_[index];
-    }
-
-    size_t width() const { return width_; }
-    size_t height() const { return height_; }
-
-private:
-    size_t width_, height_;
-    std::vector<bool> bits_;
-};
-
 /// Compute the width of the border around the image where we should not look for 
 /// feature points because the various stages of the ORB detector algorithm may
 /// otherwise access the image outside of its range.
@@ -441,10 +412,17 @@ inline unsigned BorderWidth(const Parameters& parameters) {
 Detector::Detector(const Parameters& parameters)
     : parameters_(parameters), kernels_(CreateKernels(parameters.sigma)) {}
 
-std::vector<KeyPoint> 
-Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original, size_t max_features,
+size_t
+Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
+                          size_t max_features, 
+                          std::vector<KeyPoint>& result,
+                          Descriptors* descriptors,
                           ImageLogger * logger) const {    
-    std::vector<KeyPoint> result;
+    result.clear();
+
+    if (descriptors) {
+        descriptors->clear();
+    }
 
     unsigned border_width = BorderWidth(parameters_);
     auto grayscale = RgbToGrayscale(original);
@@ -571,9 +549,11 @@ Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original, size_t max_f
 
         auto image = const_view(pyramid[feature.level]);
         float angle = CalculateOrientation(image, feature.coords, parameters_.window_size/2);
-        result.emplace_back(KeyPoint {
-            coord, angle, feature.level, ComputeDescriptor(image, feature.coords, angle)
-        });
+        result.emplace_back(KeyPoint { coord, angle, feature.level });
+
+        if (descriptors) {
+            descriptors->emplace_back(ComputeDescriptor(image, feature.coords, angle));
+        }
     }
 
     if (logger) {
@@ -596,5 +576,5 @@ Detector::ComputeFeatures(const boost::gil::rgb8c_view_t& original, size_t max_f
         logger->LogImage(const_view(display_features), "Detected Features");
     }
 
-    return result;
+    return result.size();
 }

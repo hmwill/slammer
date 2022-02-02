@@ -63,18 +63,6 @@ Descriptor Descriptor::ComputeCentroid(const std::vector<const Descriptor*> desc
     return result;
 }
 
-Descriptor::Descriptor(const uchar* bits) {
-    for (auto block_count = kNumBits / sizeof(Bitset::block_type); block_count; --block_count) {
-        Bitset::block_type block = 0;
-
-        for (auto byte_count = sizeof(Bitset::block_type) / 8; byte_count; --byte_count) {
-            block = (block << 8) | *bits++;
-        }
-
-        descriptor_.append(block);
-    }
-}
-
 //
 // Feature matching
 //

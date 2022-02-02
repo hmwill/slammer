@@ -33,6 +33,8 @@
 #include <array>
 #include <limits>
 
+#include "boost/gil/extension/io/png.hpp"
+
 using namespace slammer;
 using namespace slammer::loris;
 
@@ -227,10 +229,14 @@ private:
     EventListenerList<GroundtruthEvent>& listeners_;
 };
 
+template <typename EventType>
 class ImageEventSource: public AbstractEventSource {
 public:
+    using Image = typename EventType::Image;
+    using ImageInternal = typename Image::element_type;
+
     ImageEventSource(Driver& driver, const std::string& table_name, 
-                     EventListenerList<ImageEvent>& listeners):
+                     EventListenerList<EventType>& listeners):
         AbstractEventSource(driver, table_name, false), listeners_(listeners) {}
 
     virtual std::optional<Error> Initialize() override {
@@ -246,16 +252,19 @@ public:
     virtual std::optional<Error> FireEvent() override {
         const auto& image_name = path_[row_index_];
         std::string full_path = driver_.path() + "/" + image_name;
-        auto image = cv::imread(full_path, cv::IMREAD_UNCHANGED);
 
-        if (image.empty()) {
+        Image image(new ImageInternal());
+
+        try {
+            boost::gil::read_image(full_path, *image, boost::gil::png_tag{});
+        } catch (...) {
             std::string error_message = "Could not read image file " + full_path;
             return Error(error_message);
         }
 
-        ImageEvent event {
+        EventType event {
             Timestamp { Timediff {  timestamp_column_[row_index_] } },
-            image
+            std::move(image)
         };
 
         listeners_.HandleEvent(event);
@@ -266,7 +275,7 @@ public:
 
 private:
     std::vector<std::string> path_;
-    EventListenerList<ImageEvent>& listeners_;
+    EventListenerList<EventType>& listeners_;
 };
 
 } // namespace loris
@@ -301,11 +310,11 @@ Result<size_t> Driver::Run(const std::optional<Timediff> max_duration,
     // Add all the event sources to the heap
     AddEventSource(std::make_unique<AcceleratorEventSource>(*this, std::string("d400_accelerometer"), d400_accelerometer));
     AddEventSource(std::make_unique<GyroscopeEventSource>(*this, std::string("d400_gyroscope"), d400_gyroscope));
-    AddEventSource(std::make_unique<ImageEventSource>(*this, std::string("aligned_depth"), aligned_depth));
-    AddEventSource(std::make_unique<ImageEventSource>(*this, std::string("color"), color));
-    AddEventSource(std::make_unique<ImageEventSource>(*this, std::string("depth"), depth));
-    AddEventSource(std::make_unique<ImageEventSource>(*this, std::string("fisheye1"), fisheye1));
-    AddEventSource(std::make_unique<ImageEventSource>(*this, std::string("fisheye2"), fisheye2));
+    AddEventSource(std::make_unique<ImageEventSource<DepthImageEvent>>(*this, std::string("aligned_depth"), aligned_depth));
+    AddEventSource(std::make_unique<ImageEventSource<ColorImageEvent>>(*this, std::string("color"), color));
+    AddEventSource(std::make_unique<ImageEventSource<DepthImageEvent>>(*this, std::string("depth"), depth));
+    AddEventSource(std::make_unique<ImageEventSource<FisheyeImageEvent>>(*this, std::string("fisheye1"), fisheye1));
+    AddEventSource(std::make_unique<ImageEventSource<FisheyeImageEvent>>(*this, std::string("fisheye2"), fisheye2));
     AddEventSource(std::make_unique<AcceleratorEventSource>(*this, std::string("t265_accelerometer"), t265_accelerometer));
     AddEventSource(std::make_unique<GyroscopeEventSource>(*this, std::string("t265_gyroscope"), t265_gyroscope));
     AddEventSource(std::make_unique<GroundtruthEventSource>(*this, std::string("groundtruth"), groundtruth));

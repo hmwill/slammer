@@ -58,16 +58,19 @@ private:
     size_t first_, current_, max_;
 };
 
+template <typename ImageEvent>
 class ImageChecker {
 public:
     ImageChecker(size_t width, size_t height, size_t channels, int type):
         width_(width), height_(height), channels_(channels), type_(type) {}
 
     void Callback(const ImageEvent& event) {
-        EXPECT_EQ(event.image.cols, width_);
-        EXPECT_EQ(event.image.rows, height_);
-        EXPECT_EQ(event.image.channels(), channels_);
-        EXPECT_EQ(event.image.type(), type_);
+        EXPECT_EQ(event.image->width(), width_);
+        EXPECT_EQ(event.image->height(), height_);
+
+        // TODO: What's the equivalent for boost::gil?
+        //EXPECT_EQ(event.image_channels(), channels_);
+        //EXPECT_EQ(event.image.type(), type_);
     }
 
 private:
@@ -88,14 +91,14 @@ TEST(SlammerLorisTest, DriverTest) {
     EventCapture<GyroscopeEvent> d400_gyroscope(20, 10);
     driver.d400_gyroscope.AddHandler(std::bind(&EventCapture<GyroscopeEvent>::Callback, &d400_gyroscope, _1));
 
-    ImageChecker color_checker(848, 480, 3, CV_8UC3);
-    driver.color.AddHandler(std::bind(&ImageChecker::Callback, &color_checker, _1));
+    ImageChecker<ColorImageEvent> color_checker(848, 480, 3, CV_8UC3);
+    driver.color.AddHandler(std::bind(&ImageChecker<ColorImageEvent>::Callback, &color_checker, _1));
 
-    ImageChecker depth_checker(848, 480, 1, CV_16UC1);
-    driver.depth.AddHandler(std::bind(&ImageChecker::Callback, &depth_checker, _1));
+    ImageChecker<DepthImageEvent> depth_checker(848, 480, 1, CV_16UC1);
+    driver.depth.AddHandler(std::bind(&ImageChecker<DepthImageEvent>::Callback, &depth_checker, _1));
 
-    ImageChecker aligned_depth_checker(848, 480, 1, CV_16UC1);
-    driver.aligned_depth.AddHandler(std::bind(&ImageChecker::Callback, &aligned_depth_checker, _1));
+    ImageChecker<DepthImageEvent> aligned_depth_checker(848, 480, 1, CV_16UC1);
+    driver.aligned_depth.AddHandler(std::bind(&ImageChecker<DepthImageEvent>::Callback, &aligned_depth_checker, _1));
 
     // run for 2 secs of simulated events
     auto result = driver.Run(slammer::Timediff(2.0));

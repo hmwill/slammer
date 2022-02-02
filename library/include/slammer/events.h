@@ -42,10 +42,14 @@
 #include "Eigen/Dense"
 #include "opencv2/opencv.hpp"
 
+#include <boost/gil.hpp>
+
 namespace slammer {
 
 using Vector3d = Eigen::Vector3d;
-using Image = cv::Mat;
+using ColorImage = std::shared_ptr<boost::gil::rgb8_image_t>;
+using DepthImage = std::shared_ptr<boost::gil::gray16_image_t>;
+using FisheyeImage = std::shared_ptr<boost::gil::gray8_image_t>;
 
 /// Common base class for different types of events
 struct Event {
@@ -63,8 +67,21 @@ struct GyroscopeEvent: public Event {
 };
 
 /// An image captured by a form of imaging device/camera
-struct ImageEvent: public Event {
-    Image image;
+struct ColorImageEvent: public Event {
+    using Image = ColorImage;
+    ColorImage image;
+};
+
+/// An image captured by a form of imaging device/camera
+struct DepthImageEvent: public Event {
+    using Image = DepthImage;
+    DepthImage image;
+};
+
+/// An image captured by a form of imaging device/camera
+struct FisheyeImageEvent: public Event {
+    using Image = FisheyeImage;
+    FisheyeImage image;
 };
 
 /// Steady clock beat creatad by a timer

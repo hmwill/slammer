@@ -34,6 +34,7 @@
 #pragma once
 
 #include "slammer/slammer.h"
+#include "slammer/orb.h"
 
 #include "absl/container/btree_map.h"
 #include "absl/container/btree_set.h"
@@ -70,8 +71,8 @@ struct Keyframe: std::enable_shared_from_this<Keyframe> {
     // tracked features within the keyframe
     std::vector<FeaturePointer> features;
 
-    // feature descriptions; index aligns with `features` member variable
-    cv::Mat descriptions;
+    // associated descriptors (should those live within the individual features?)
+    Descriptors descriptions;
 
     // Keyframe pose is pinned in space; to be excluded from optimization
     bool pinned;
@@ -90,7 +91,7 @@ struct Keyframe: std::enable_shared_from_this<Keyframe> {
 
 struct Feature: std::enable_shared_from_this<Feature> {
     // keypoint specification
-    cv::KeyPoint keypoint;
+    orb::KeyPoint keypoint;
 
     // depth value as measured via depth sensor
     float depth;

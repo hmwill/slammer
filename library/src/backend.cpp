@@ -50,11 +50,11 @@ namespace {
 // Link all features in the incoming new frame that have been matched against a given reference
 // frame to the landmarks already associated with their corresponding feature.
 void MatchFeaturesToLandmarks(const KeyframePointer& reference_frame, const KeyframePointer& new_frame,
-                              const std::vector<cv::DMatch>& matches) {
+                              const std::vector<Match>& matches) {
     for (const auto& match: matches) {
-        auto landmark = reference_frame->features[match.trainIdx]->landmark.lock();
-        new_frame->features[match.queryIdx]->landmark = landmark;
-        landmark->observations.push_back(new_frame->features[match.queryIdx]);
+        auto landmark = reference_frame->features[match.target_index]->landmark.lock();
+        new_frame->features[match.query_index]->landmark = landmark;
+        landmark->observations.push_back(new_frame->features[match.query_index]);
     }
 }
 
@@ -70,7 +70,7 @@ inline g2o::Isometry3 IsometryFromSE3d(const SE3d& se3d) {
 Backend::Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map, 
                  KeyframeIndex& keyframe_index)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera),
-        map_(map), keyframe_index_(keyframe_index), matcher_(cv::NORM_HAMMING, true) {}
+        map_(map), keyframe_index_(keyframe_index) {}
 
 void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
     auto previous_frame = map_.GetMostRecentKeyframe();
@@ -126,7 +126,7 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
         keyframe_index_.Search(keyframe, loop_candidates, parameters_.max_loop_candidiates);
 
         KeyframePointer previous_frame;
-        std::vector<cv::DMatch> previous_frame_matches;
+        std::vector<Match> previous_frame_matches;
         double match_score = 0.0;
 
         for (const auto& result: loop_candidates) {
@@ -139,12 +139,12 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
             std::vector<Point3d> keyframe_points, candidate_points;
 
             for (const auto& match: matches) {
-                auto keyframe_keypoint = keyframe->features[match.trainIdx]->keypoint.pt;
-                auto keyframe_depth = keyframe->features[match.trainIdx]->depth;
+                auto keyframe_keypoint = keyframe->features[match.target_index]->keypoint.coords;
+                auto keyframe_depth = keyframe->features[match.target_index]->depth;
                 keyframe_points.push_back(rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth));
 
-                auto candidate_keypoint = keyframe->features[match.queryIdx]->keypoint.pt;
-                auto candidate_depth = keyframe->features[match.queryIdx]->depth;
+                auto candidate_keypoint = keyframe->features[match.query_index]->keypoint.coords;
+                auto candidate_depth = keyframe->features[match.query_index]->depth;
                 candidate_points.push_back(rgb_camera_.PixelToCamera(candidate_keypoint, candidate_depth));
             }
 
@@ -236,12 +236,12 @@ bool Backend::DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePoin
         std::vector<Point3d> keyframe_points, candidate_points;
 
         for (const auto& match: matches) {
-            auto keyframe_keypoint = keyframe->features[match.trainIdx]->keypoint.pt;
-            auto keyframe_depth = keyframe->features[match.trainIdx]->depth;
+            auto keyframe_keypoint = keyframe->features[match.target_index]->keypoint.coords;
+            auto keyframe_depth = keyframe->features[match.target_index]->depth;
             keyframe_points.push_back(rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth));
 
-            auto candidate_keypoint = keyframe->features[match.queryIdx]->keypoint.pt;
-            auto candidate_depth = keyframe->features[match.queryIdx]->depth;
+            auto candidate_keypoint = keyframe->features[match.query_index]->keypoint.coords;
+            auto candidate_depth = keyframe->features[match.query_index]->depth;
             candidate_points.push_back(rgb_camera_.PixelToCamera(candidate_keypoint, candidate_depth));
         }
 
@@ -277,8 +277,8 @@ bool Backend::DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePoin
         // TODO: #1 Change the logic to return best candidate, not first valid candidate
         // https://github.com/hmwill/slammer/issues/1
         for (const auto& match: matches) {
-            auto source_landmark = keyframe->features[match.trainIdx]->landmark.lock();
-            auto target_landmark = loop_keyframe->features[match.queryIdx]->landmark.lock();
+            auto source_landmark = keyframe->features[match.target_index]->landmark.lock();
+            auto target_landmark = loop_keyframe->features[match.query_index]->landmark.lock();
 
             landmark_mapping[source_landmark->id] = target_landmark->id;
         }
@@ -290,22 +290,8 @@ bool Backend::DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePoin
 }
 
 
-std::vector<cv::DMatch> Backend::MatchFeatures(const cv::Mat& reference, const cv::Mat& query) {
-    std::vector<cv::DMatch> matches;
-    matcher_.match(reference, query, matches);
-
-    // trim matches based on parameters.max_match_distance
-    std::sort(matches.begin(), matches.end());
-
-    auto iter = matches.begin();
-    for (; iter != matches.end(); ++iter) {
-        if (iter->distance > parameters_.max_match_distance) {
-            break;
-        }
-    }
-
-    matches.erase(iter, matches.end());
-    return matches;
+std::vector<Match> Backend::MatchFeatures(const Descriptors& reference, const Descriptors& query) {
+    return ComputeMatches(reference, query, parameters_.max_match_distance);
 }
 
 void Backend::ExtractLocalGraph(const Keyframes& seeds, Keyframes& keyframes,
@@ -468,7 +454,7 @@ Backend::EstimateLocations(const Keyframes& keyframes, const Landmarks& landmark
                 continue;
             }
 
-            auto keyframe_keypoint = feature->keypoint.pt;
+            auto keyframe_keypoint = feature->keypoint.coords;
             auto keyframe_depth = feature->depth;
             estimate = keyframe->pose.inverse() * rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth);
 
@@ -562,7 +548,7 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
                 edge->setVertex( 0, optimizer.vertex(keyframe_index));
                 edge->setVertex( 1, optimizer.vertex(landmark_index + landmark_vertex_offset));
                 // TODO: At some point, we need to use robot coordinates instead of camera coordinates
-                edge->setMeasurement(inout ? locations[landmark_index] : rgb_camera_.PixelToCamera(feature->keypoint.pt, feature->depth));
+                edge->setMeasurement(inout ? locations[landmark_index] : rgb_camera_.PixelToCamera(feature->keypoint.coords, feature->depth));
 
                 // TODO: Apply error model for depth measurement
                 edge->setInformation(Eigen::Matrix3d::Identity());

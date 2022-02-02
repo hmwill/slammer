@@ -69,14 +69,14 @@ public:
 
     EventListenerList<AccelerometerEvent> d400_accelerometer;
     EventListenerList<GyroscopeEvent> d400_gyroscope;
-    EventListenerList<ImageEvent> aligned_depth;
-    EventListenerList<ImageEvent> depth;
-    EventListenerList<ImageEvent> color;
+    EventListenerList<DepthImageEvent> aligned_depth;
+    EventListenerList<DepthImageEvent> depth;
+    EventListenerList<ColorImageEvent> color;
 
     EventListenerList<AccelerometerEvent> t265_accelerometer;
     EventListenerList<GyroscopeEvent> t265_gyroscope;
-    EventListenerList<ImageEvent> fisheye1;
-    EventListenerList<ImageEvent> fisheye2;
+    EventListenerList<FisheyeImageEvent> fisheye1;
+    EventListenerList<FisheyeImageEvent> fisheye2;
 
     EventListenerList<GroundtruthEvent> groundtruth;
 

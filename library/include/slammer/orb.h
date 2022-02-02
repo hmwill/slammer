@@ -34,6 +34,8 @@
 #pragma once
 
 #include "slammer/slammer.h"
+
+#include "slammer/bitmap.h"
 #include "slammer/descriptor.h"
 #include "slammer/image.h"
 
@@ -57,9 +59,6 @@ struct KeyPoint {
 
     /// the level within the image pyramid
     uint32_t level;
-
-    /// the bit pattern identiyfing the feature
-    Descriptor descriptor_;
 };
 
 /// The parameters needed to fully specify ORB feature detection and descriptor
@@ -106,11 +105,15 @@ public:
     ///
     /// \param original     the original RGB image in which we want to detect feature points
     /// \param max_features the maximum number of features to return
+    /// \param result       container to receive the collection of detected features
+    /// \param descriptors  if not nullptr, receives the feature descriptors
     ///
-    /// \returns the collection of detected features and their description
-    std::vector<KeyPoint> ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
-                                          size_t max_features = 200,
-                                          ImageLogger * logger = nullptr) const;
+    /// \returns the number of detected features
+    size_t ComputeFeatures(const boost::gil::rgb8c_view_t& original, 
+                           size_t max_features, 
+                           std::vector<KeyPoint>& result,
+                           Descriptors* descriptors = nullptr,
+                           ImageLogger * logger = nullptr) const;
 
 private:
     Parameters parameters_;
