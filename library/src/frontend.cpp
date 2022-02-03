@@ -235,7 +235,7 @@ void RgbdFrontend::ProcessFrame() {
 
             std::vector<uchar> mask;
 
-#if 0
+#if 1
             num_features = 
                 RobustIcp(current_coords, tracked_feature_coords_, 
                           random_engine_, relative_motion, mask,
@@ -320,8 +320,10 @@ size_t RgbdFrontend::DetectAdditionalFeatures(size_t num_additonal) {
         int y_max = std::min(ptrdiff_t(floorf(point.y)) + parameters_.orb_parameters.min_distance + 1, mask.height());
 
         for (auto y = y_min; y < y_max; ++y) {
+            auto iter = mask.row_begin(y);
+
             for (auto x = x_min; x < x_max; ++x) {
-                mask(x, y) = kFillValue;
+                iter[x] = kFillValue;
             }
         }
     }

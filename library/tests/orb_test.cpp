@@ -56,7 +56,8 @@ TEST(OrbTest, Basic) {
     EXPECT_EQ(features.size(), num_features);
     EXPECT_LE(features.size(), 50);
 
-    for (const auto& feature: features) {
-        std::cout << "(" << feature.coords.x << ", " << feature.coords.y << ")" << std::endl;
-    }
+    // Used to generate data for flow_test.cpp
+    // for (const auto& feature: features) {
+    //     std::cout << "(" << feature.coords.x << ", " << feature.coords.y << ")" << std::endl;
+    // }
 } 
