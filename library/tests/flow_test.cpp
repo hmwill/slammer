@@ -158,4 +158,9 @@ TEST(FlowTest, SimpleTest) {
         LogFeatures(logger, "Input", const_view(source), source_points);
         LogFeatures(logger, "Output", const_view(target), target_points, &source_points);
     }
+
+    // Test data for pose_test.cpp
+    // for (const auto& point: target_points) {
+    //     std::cout << "Point2f(" << point.x << ", " << point.y << ")," << std::endl; 
+    // }
 }

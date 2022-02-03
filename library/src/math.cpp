@@ -287,7 +287,7 @@ SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std
     // Perform the actual optimization
     optimizer.setVerbose(false); // while debugging
     optimizer.initializeOptimization();
-    optimizer.optimize(100 /*iterations*/);
+    optimizer.optimize(iterations);
 
     // retrieve results
     auto vertex = dynamic_cast<g2o::VertexSE3 *>(optimizer.vertex(transformed_index));
