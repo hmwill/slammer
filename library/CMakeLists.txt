@@ -7,6 +7,7 @@ add_library(slammer_lib
   src/imu.cpp 
   src/math.cpp
   src/keyframe_index.cpp
+  src/optimizer.cpp
   src/orb.cpp
   src/utility.cpp
   src/loris/driver.cpp src/loris/opencv_utils.cpp
@@ -32,6 +33,7 @@ add_executable(test_slammer_lib
   tests/math_test.cpp
   tests/keyframe_index_test.cpp
   tests/pose_test.cpp
+  tests/optimizer_test.cpp
   tests/orb_test.cpp
   tests/utility_test.cpp
   tests/loris/driver_test.cpp tests/loris/opencv_utils_test.cpp
