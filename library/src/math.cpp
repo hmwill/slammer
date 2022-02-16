@@ -168,6 +168,10 @@ size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vect
                 num_additonal_inliers += is_inlier;
             }
 
+            std::cout << "Translation: " << estimate.translation().norm() 
+                      << " Inliers: " << num_additonal_inliers
+                      << std::endl;
+
             if (num_additonal_inliers >= min_additional_inliers) {
                 sample_reference.clear();
                 sample_transformed.clear();
@@ -179,7 +183,7 @@ size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vect
                     }
                 }
 
-                SE3d estimate = CalculateIcp(sample_reference, sample_transformed);
+                SE3d estimate = CalculateIcp(sample_reference, sample_transformed);             
                 double variance = EstimateVariance(sample_reference, sample_transformed, estimate);
 
                 if (variance < best_variance) {
@@ -244,23 +248,24 @@ SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std
     auto camera_parameters = new g2o::ParameterCamera();
     camera_parameters->setId(0);
     camera_parameters->setKcam(camera.fx(), camera.fy(), 0.0, 0.0 /*camera.cx(), camera.cy()*/);
+    // camera_parameters->setKcam(camera.fx(), camera.fy(), camera.cx(), camera.cy());
     //camera_parameters->setBaseline(baseline);
     optimizer.addParameter(camera_parameters);
 
-    using EdgeType = g2o::EdgeSE3PointXYZDisparity;
+    // using EdgeType = g2o::EdgeSE3PointXYZDisparity;
+    using EdgeType = g2o::EdgeSE3PointXYZ;
 
     EdgeType::InformationType information;
-    information <<
-        1.0, 0.0, 0.0, 
-        0.0, 1.0, 0.0,
-        0.0, 0.0, 1000.0 * camera.fx() * baseline;
+    // information <<
+    //     1.0, 0.0, 0.0, 
+    //     0.0, 1.0, 0.0,
+    //     0.0, 0.0, 1000.0 * camera.fx() * baseline;
 
     for (size_t index = 0; index < reference.size(); ++index) {
         if (!mask[index]) {
             continue;
         }
 
-        //using EdgeType = g2o::EdgeSE3PointXYZ;
         auto edge = new EdgeType();
         edge->setVertex(0, optimizer.vertex(origin_index));
         edge->setVertex(1, optimizer.vertex(index));
@@ -279,7 +284,9 @@ SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std
         edge->setParameterId(0, 0);
         edge->setRobustKernel(new g2o::RobustKernelHuber());
         auto camera_pt = camera.CameraToPixel(transformed[index]);
-        Point3d measurement(camera_pt.x - camera.cx(), camera_pt.y - camera.cy(), 1.0/transformed[index].z());
+        // Point3d measurement(camera_pt.x - camera.cx(), camera_pt.y - camera.cy(), 1.0/transformed[index].z());
+        // Point3d measurement(camera_pt.x, camera_pt.y, 1.0/transformed[index].z()); //camera.fx() * baseline
+        Point3d measurement(transformed[index]);
         optimizer.addEdge(edge);
         edge->setMeasurement(measurement);
     }

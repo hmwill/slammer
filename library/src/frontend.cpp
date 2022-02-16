@@ -227,13 +227,13 @@ void RgbdFrontend::ProcessFrame() {
             std::vector<Point3d> current_coords;
 
             // TODO: num_features < parameters_.num_features_tracking_bad
+            std::vector<uchar> mask;
 
             for (const auto& point: current_points) {
                 auto z = DepthForPixel(current_frame_data_, point);
                 current_coords.push_back(rgb_camera_.PixelToCamera(point, z));
+                mask.push_back(z != 0 ? std::numeric_limits<uchar>::max() : 0);
             }    
-
-            std::vector<uchar> mask;
 
 #if 1
             num_features = 
@@ -242,7 +242,6 @@ void RgbdFrontend::ProcessFrame() {
                           parameters_.max_iterations, parameters_.sample_size, 
                           parameters_.outlier_threshold);
 #else 
-            std::fill_n(std::back_inserter(mask), num_features, std::numeric_limits<uchar>::max());
             MaskNaN(tracked_feature_coords_, mask);
             MaskNaN(current_coords, mask);
 
@@ -294,12 +293,15 @@ size_t RgbdFrontend::DetectKeyframeFeatures() {
 
     // add new features to tracked feature set
     tracked_features_.clear();
-    std::transform(key_points_.begin(), key_points_.end(), std::back_inserter(tracked_features_),
-                   [](const auto& keypoint) { return keypoint.coords; });
+    tracked_feature_coords_.clear();
 
     for (const auto& point: key_points_) {
         auto z = DepthForPixel(current_frame_data_, point.coords);
-        tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
+
+        if (z) {
+            tracked_features_.push_back(point.coords);
+            tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
+        }
     }    
 
     return tracked_features_.size();
@@ -340,8 +342,11 @@ size_t RgbdFrontend::DetectAdditionalFeatures(size_t num_additonal) {
 
     for (const auto& point: additional_points) {
         auto z = DepthForPixel(current_frame_data_, point.coords);
-        tracked_features_.push_back(point.coords);
-        tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
+
+        if (z) {
+            tracked_features_.push_back(point.coords);
+            tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
+        }
     }    
 
     return tracked_features_.size();

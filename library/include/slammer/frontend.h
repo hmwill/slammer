@@ -113,7 +113,7 @@ public:
         size_t sample_size = 10;
         
         /// ICP outlier threshold
-        double outlier_threshold = 7.16;
+        double outlier_threshold = 0.1;
 
         int num_features = 200;
         int num_features_init = 100;
