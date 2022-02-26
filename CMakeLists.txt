@@ -34,6 +34,9 @@ include_directories(${SuiteSparse_INCLUDE_DIRS})
 find_package(g2o REQUIRED)
 include_directories(${g2o_INCLUDE_DIRS})
 
+find_package(fmt REQUIRED)
+include_directories(${fmt_INCLUDE_DIRS})
+
 find_package(libpng REQUIRED)
 include_directories(${libpng_INCLUDE_DIRS})
 

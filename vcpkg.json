@@ -5,6 +5,7 @@
       "abseil",
       "boost",
       "eigen3",
+      "fmt",
       "g2o",
       "gtest",
       "libpng",

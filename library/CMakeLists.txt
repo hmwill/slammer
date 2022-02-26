@@ -47,6 +47,7 @@ target_link_libraries(test_slammer_lib
   g2o::core g2o::stuff g2o::types_slam3d g2o::solver_cholmod
   Eigen3::Eigen
   png
+  fmt::fmt
 )
 
 add_test(NAME SlammerLibTests COMMAND test_slammer_lib WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
