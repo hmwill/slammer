@@ -218,11 +218,11 @@ TEST(OptimizerTest, ReconstructPoseNoError) {
         auto result = 
             iter == 0 ?
                 GaussNewton(std::bind(&PerspectiveAndPoint3d::CalculateJacobian, &instance, _1),
-                                std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
-                                variables, 10) :
+                            std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
+                            variables, 10) :
                 LevenbergMarquardt(std::bind(&PerspectiveAndPoint3d::CalculateJacobian, &instance, _1),
-                                         std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
-                                         variables, 10, 0.1);
+                                   std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
+                                   variables, 10, 0.1);
 
         EXPECT_TRUE(result.ok());
 
@@ -302,11 +302,11 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
         auto result = 
             iter == 0 ?
                 GaussNewton(std::bind(&PerspectiveAndPoint3d::CalculateJacobian, &instance, _1),
-                                std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
-                                variables, 10) :
+                            std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
+                            variables, 10) :
                 LevenbergMarquardt(std::bind(&PerspectiveAndPoint3d::CalculateJacobian, &instance, _1),
-                                         std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
-                                         variables, 10, 0.1);
+                                   std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
+                                   variables, 10, 0.1);
 
         EXPECT_TRUE(result.ok());
 
