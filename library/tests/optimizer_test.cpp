@@ -208,7 +208,6 @@ TEST(OptimizerTest, ReconstructPoseNoError) {
             variables(Eigen::seqN(index * 3 + 6, 3)) = points[index];
         }
 
-        //variables(Eigen::seqN(0, 6)) = inv_pose.log();
         variables(Eigen::seqN(0, 6)) = SE3d::Tangent::Zero();
 
         PerspectiveAndPoint3d instance(camera, camera, point_pairs);
@@ -268,8 +267,8 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
         };
 
         // Determine a second pose
-        Quaterniond rotation(Eigen::AngleAxisd(0.3, Point3d(0.0, 0.0, 1.0)));
-        Point3d translation(0.2, 0.1, 0.5);
+        Quaterniond rotation(Eigen::AngleAxisd(0.5, Point3d(0.0, 0.0, 1.0)));
+        Point3d translation(1.2, 1.0, 0.5);
         SE3d pose(rotation, translation);
         SE3d inv_pose = pose.inverse();
 
@@ -292,7 +291,6 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
             variables(Eigen::seqN(index * 3 + 6, 3)) = points[index];
         }
 
-        //variables(Eigen::seqN(0, 6)) = inv_pose.log();
         variables(Eigen::seqN(0, 6)) = SE3d::Tangent::Zero();
 
         PerspectiveAndPoint3d instance(camera, camera, point_pairs);
