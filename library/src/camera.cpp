@@ -49,3 +49,12 @@ Point3d Camera::PixelToRobot(const Point2f& coord, double depth) const {
     return camera_to_robot_ * PixelToCamera(coord, depth);
 }
 
+Matrix3d Camera::Jacobian(const Point3d& coord) const {
+    Matrix3d result;
+    result << 
+        fx_ / coord.z(),    0.0,                -fx_ * coord.x() / Square(coord.z()),
+        0.0,                fy_ / coord.z(),    -fy_ * coord.y() / Square(coord.z()),
+        0.0,                0.0,                1.0;
+
+    return result;
+}

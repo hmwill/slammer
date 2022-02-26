@@ -172,6 +172,11 @@ private:
     std::variant<std::monostate, Value, Error> result_;
 };
 
+template <typename Scalar>
+inline constexpr Scalar Square(Scalar value) {
+    return value * value;
+}
+
 } // namespace slammer
 
 #endif // ndef SLAMMER_SLAMMER_H

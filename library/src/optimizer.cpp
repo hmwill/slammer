@@ -40,6 +40,12 @@ slammer::GaussNewton(const Jacobian& jacobian_function, const Residual& residual
     while (max_iterations--) {
         auto jacobian = jacobian_function(value);
         auto residual = residual_function(value);
+        auto error = residual.squaredNorm();
+
+        // std::cout << "Value = " << value.transpose() << std::endl;
+        // std::cout << "Residual = " << residual.transpose() << std::endl;
+        // std::cout << "Squared error =  " << error << std::endl;
+
         Eigen::SparseMatrix<double> lhs = jacobian.transpose() * jacobian;
         Eigen::VectorXd rhs = jacobian.transpose() * residual;
         Eigen::SimplicialLLT<Eigen::SparseMatrix<double> > solver;
@@ -49,12 +55,14 @@ slammer::GaussNewton(const Jacobian& jacobian_function, const Residual& residual
             return Error("slammer::GaussNewton: Failed to factorize matrix");
         }
 
-        value -= solver.solve(rhs);
+        Eigen::VectorXd delta = solver.solve(rhs);
 
         if(solver.info() != Eigen::Success) {
             return Error("slammer::GaussNewton: Failed to solve for right-hand side");
         }
 
+        // std::cout << "Delta = " << delta.transpose() << std::endl;
+        value -= delta;
     }
 
     auto residual = residual_function(value);
@@ -67,12 +75,18 @@ slammer::LevenbergMarquardt(const Jacobian& jacobian_function, const Residual& r
                             unsigned max_iterations, double lambda) {    
     while (max_iterations--) {
         auto jacobian = jacobian_function(value);
-        auto dim = jacobian.rows();
+        auto dim = jacobian.cols();
         Eigen::SparseMatrix<double> lambda_identity(dim, dim);
         lambda_identity.setIdentity();
         lambda_identity *= lambda;
 
         auto residual = residual_function(value);
+        auto error = residual.squaredNorm();
+
+        // std::cout << "Value = " << value.transpose() << std::endl;
+        // std::cout << "Residual = " << residual.transpose() << std::endl;
+        // std::cout << "Squared error =  " << error << std::endl;
+
         Eigen::SparseMatrix<double> lhs = jacobian.transpose() * jacobian + lambda_identity;
         Eigen::VectorXd rhs = jacobian.transpose() * residual;
         Eigen::SimplicialLLT<Eigen::SparseMatrix<double> > solver;
@@ -82,12 +96,14 @@ slammer::LevenbergMarquardt(const Jacobian& jacobian_function, const Residual& r
             return Error("slammer::LevenbergMarquardt: Failed to factorize matrix");
         }
 
-        value -= solver.solve(rhs);
+        Eigen::VectorXd delta = solver.solve(rhs);
 
         if(solver.info() != Eigen::Success) {
             return Error("slammer::LevenbergMarquardt: Failed to solve for right-hand side");
         }
 
+        // std::cout << "Delta = " << delta.transpose() << std::endl;
+        value -= delta;
     }
 
     auto residual = residual_function(value);

@@ -62,9 +62,13 @@ public:
 
     inline Point3d PixelToCamera(const Point2f& coord, double depth = 1.0) const;
     inline Point2f CameraToPixel(const Point3d& coord) const;
+    inline Point3d CameraToPixelDepth(const Point3d& coord) const;
 
     Point2f RobotToPixel(const Point3d& coord) const;
     Point3d PixelToRobot(const Point2f& coord, double depth = 1.0) const;
+
+    /// Calculate the Jacobian treating the depth value as is
+    Matrix3d Jacobian(const Point3d& coord) const;
 
     SE3d camera_to_robot() const { return camera_to_robot_; }
 
@@ -93,6 +97,12 @@ private:
 Point2f Camera::CameraToPixel(const Point3d& coord) const {
     return Point2f(coord(0) / coord(2) * fx_ + cx_,
                    coord(1) / coord(2) * fy_ + cy_);
+}
+
+Point3d Camera::CameraToPixelDepth(const Point3d& coord) const {
+    return Point3d(coord(0) / coord(2) * fx_ + cx_,
+                   coord(1) / coord(2) * fy_ + cy_,
+                   coord(2) * 1.0);
 }
 
 Point3d Camera::PixelToCamera(const Point2f& coord, double depth) const {
