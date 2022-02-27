@@ -106,6 +106,16 @@ Result<FrameSet> ReadFrames(const std::string& transformations_path);
 /// \return                 a camera object for the SLAM enginer
 Camera CreateCamera(const CameraParameters& parameters, const SE3d& pose);
 
+/// Create a camera based on camera parameters and a transformation describing the pose
+///
+/// \param parameters       camera parameters as maintained by OpenCV
+/// \param baseline         distance between the two depth sensor cameras
+/// \param pose             the camera pose relative to the robot frame
+///
+/// \return                 a camera object for the SLAM enginer
+StereoDepthCamera
+CreateAlignedStereoDepthCamera(const CameraParameters& parameters, float baseline,  const SE3d& pose);
+
 /// Retrieve the pose relative to origin (base_link) for a specific frame
 ///
 /// \param frames   the frame set describing relative poses of frames to each other

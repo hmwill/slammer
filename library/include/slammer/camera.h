@@ -80,7 +80,7 @@ public:
     float cx() const { return cx_; }
     float cy() const { return cy_; }
 
-private:
+protected:
     /// Transformation matrix of camera frame to robot frame
     SE3d camera_to_robot_;
 
@@ -92,6 +92,34 @@ private:
 
     /// camera image dimension
     float width_, height_;
+};
+
+class StereoDepthCamera: public Camera {
+public:
+    /// Initialize the camera with its parameters values
+    ///
+    /// \param width number of pixels along first pixel coodinate
+    /// \param height number of pixels along second pixel coordinate
+    /// \param fx focal length (x-direction) 
+    /// \param fy focal length (y-direction)
+    /// \param cx x-coordinate of focal center
+    /// \param cy y-coordinate of focal center
+    /// \param camera_to_robot Transformation to apply to convert 3D coordinates relative to the camera
+    ///     to 3D coordinates for the robot
+    /// \param baseline the distance between the two stereo cameras for depth calculation
+    StereoDepthCamera(float width, float height,
+           float fx, float fy, float cx, float cy, float baseline,
+           SE3d camera_to_robot)
+        : Camera(width, height, fx, fy, cx, cy, camera_to_robot), baseline_(baseline) {}
+
+    inline Point3d CameraToPixelDisparity(const Point3d& coord) const;
+
+    /// Calculate the Jacobian treating the depth value as disparity
+    Matrix3d Jacobian(const Point3d& coord) const;
+
+private:
+    /// The baseline distance
+    float baseline_;
 };
 
 Point2f Camera::CameraToPixel(const Point3d& coord) const {
@@ -109,6 +137,12 @@ Point3d Camera::PixelToCamera(const Point2f& coord, double depth) const {
     return Point3d((coord.x - cx_) * depth / fx_,
                    (coord.y - cy_) * depth / fy_,
                    depth);
+}
+
+Point3d StereoDepthCamera::CameraToPixelDisparity(const Point3d& coord) const {
+    return Point3d(coord(0) / coord(2) * fx_ + cx_,
+                   coord(1) / coord(2) * fy_ + cy_,
+                   baseline_ / coord(2) * fx_);
 }
 
 

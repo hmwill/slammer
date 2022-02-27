@@ -73,7 +73,7 @@ public:
     typedef std::pair<Point3d, Point3d> PointPair;
     typedef std::vector<PointPair> PointPairs;
 
-    PerspectiveAndPoint3d(const Camera& first, const Camera& second,
+    PerspectiveAndPoint3d(const StereoDepthCamera& first, const StereoDepthCamera& second,
                           const PointPairs& point_pairs)
         : first_(first), second_(second), point_pairs_(point_pairs) {
 
@@ -147,11 +147,11 @@ public:
 
         for (size_t index = 0; index < point_pairs_.size(); ++index) {
             Vector3d coords(value(Eigen::seqN(index * 3 + 6, 3)));
-            auto first_projection = first_.CameraToPixelDepth(coords);
+            auto first_projection = first_.CameraToPixelDisparity(coords);
             residual(Eigen::seqN(index * 6, 3)) = first_projection - point_pairs_[index].first;
 
             auto second_coords = second_pose * coords;
-            auto second_projection = second_.CameraToPixelDepth(second_coords);
+            auto second_projection = second_.CameraToPixelDisparity(second_coords);
             residual(Eigen::seqN(index * 6 + 3, 3)) = second_projection - point_pairs_[index].second;
         }
 
@@ -159,8 +159,8 @@ public:
     }
 
 private:
-    Camera first_;
-    Camera second_;
+    StereoDepthCamera first_;
+    StereoDepthCamera second_;
     PointPairs point_pairs_;
 };
 
@@ -175,7 +175,7 @@ TEST(OptimizerTest, ReconstructPoseNoError) {
         EXPECT_TRUE(sensor_info_result.ok());
         auto sensor_info = sensor_info_result.value();
 
-        Camera camera = CreateCamera(sensor_info.d400_color_optical_frame, SE3d());
+        StereoDepthCamera camera = CreateAlignedStereoDepthCamera(sensor_info.d400_color_optical_frame, 0.05, SE3d());
 
         // Determine a set of points
         std::vector<Point3d> points = {
@@ -197,8 +197,8 @@ TEST(OptimizerTest, ReconstructPoseNoError) {
         PerspectiveAndPoint3d::PointPairs point_pairs;
 
         for (const auto& point: points) {
-            point_pairs.emplace_back(camera.CameraToPixelDepth(point), 
-                                    camera.CameraToPixelDepth(inv_pose * point));
+            point_pairs.emplace_back(camera.CameraToPixelDisparity(point), 
+                                     camera.CameraToPixelDisparity(inv_pose * point));
         }
 
         // Reconstruct pose and locations; using true locations and identity pose as starting point
@@ -254,7 +254,7 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
         EXPECT_TRUE(sensor_info_result.ok());
         auto sensor_info = sensor_info_result.value();
 
-        Camera camera = CreateCamera(sensor_info.d400_color_optical_frame, SE3d());
+        StereoDepthCamera camera = CreateAlignedStereoDepthCamera(sensor_info.d400_color_optical_frame, 0.05, SE3d());
 
         // Determine a set of points
         std::vector<Point3d> points = {
@@ -280,8 +280,8 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
             Vector3d first_noise(normal(random_engine), normal(random_engine), normal(random_engine));
             Vector3d second_noise(normal(random_engine), normal(random_engine), normal(random_engine));
 
-            point_pairs.emplace_back(camera.CameraToPixelDepth(point) + first_noise, 
-                                    camera.CameraToPixelDepth(inv_pose * point) + second_noise);
+            point_pairs.emplace_back(camera.CameraToPixelDisparity(point) + first_noise, 
+                                     camera.CameraToPixelDisparity(inv_pose * point) + second_noise);
         }
 
         // Reconstruct pose and locations; using true locations and identity pose as starting point
@@ -323,4 +323,5 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
         }
     }
 }
+
 

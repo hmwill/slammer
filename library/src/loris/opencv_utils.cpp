@@ -222,6 +222,16 @@ Camera slammer::loris::CreateCamera(const CameraParameters& parameters, const SE
     return Camera (parameters.width, parameters.height, fx, fy, cx, cy, pose);
 }
 
+StereoDepthCamera slammer::loris::CreateAlignedStereoDepthCamera(const CameraParameters& parameters, float baseline, 
+                                                      const SE3d& pose) {
+    auto fx = parameters.intrinsics.at<double>(0);
+    auto cx = parameters.intrinsics.at<double>(1);
+    auto fy = parameters.intrinsics.at<double>(2);
+    auto cy = parameters.intrinsics.at<double>(3);
+
+    return StereoDepthCamera(parameters.width, parameters.height, fx, fy, cx, cy, baseline, pose);
+}
+
 Result<SE3d> slammer::loris::GetFramePose(const FrameSet& frames, const FrameName& name) {
     SE3d pose;
     const FrameName* current_name = &name;
