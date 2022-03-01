@@ -179,7 +179,7 @@ TEST(PoseTest, SimpleTest) {
 
     std::vector<uchar> mask(source_spatial.size(), 255);
 
-#if false // 0.0157181
+#if true // 0.0.099107
     SE3d relative_motion;
 
     size_t num_features = 
@@ -188,7 +188,7 @@ TEST(PoseTest, SimpleTest) {
                     max_iterations, sample_size, 
                     outlier_threshold);
 #else
-    // 0.0232661
+    // 0.0439882
     SE3d relative_motion =
         OptimizeAlignment(source_spatial, target_spatial,
                        mask, depth_camera, 0.05, 20);

@@ -113,6 +113,7 @@ public:
         : Camera(width, height, fx, fy, cx, cy, camera_to_robot), baseline_(baseline) {}
 
     inline Point3d CameraToPixelDisparity(const Point3d& coord) const;
+    inline Point3d PixelDisparityToCamera(const Point3d& coord) const;
 
     /// Calculate the Jacobian treating the depth value as disparity
     Matrix3d Jacobian(const Point3d& coord) const;
@@ -143,6 +144,13 @@ Point3d StereoDepthCamera::CameraToPixelDisparity(const Point3d& coord) const {
     return Point3d(coord(0) / coord(2) * fx_ + cx_,
                    coord(1) / coord(2) * fy_ + cy_,
                    baseline_ / coord(2) * fx_);
+}
+
+Point3d StereoDepthCamera::PixelDisparityToCamera(const Point3d& coord) const {
+    double depth = baseline_ / coord(2) * fx_;
+    return Point3d((coord.x() - cx_) * depth / fx_,
+                   (coord.y() - cy_) * depth / fy_,
+                   depth);
 }
 
 

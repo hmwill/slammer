@@ -37,6 +37,8 @@
 #include "slammer/camera.h"
 #include "slammer/loris/opencv_utils.h"
 
+#include "boost/gil/extension/io/png.hpp"
+
 using namespace slammer;
 using namespace slammer::loris;
 
@@ -55,7 +57,41 @@ void EmitTriplets(const Matrix& matrix, Iterator output, size_t row_offset, size
     }
 }
 
+using namespace boost::gil;
+
+// Depth scale used: https://lifelong-robotic-vision.github.io/dataset/scene
+static constexpr double kDepthScale = 0.001;
+
+inline double DepthForPixel(const gray16c_view_t& frame, Point2f point) {
+    float column = point.x, row = point.y; 
+    auto depth = frame.at(floorf(column), floorf(row))[0];
+
+    // 0 depth represents a missing depth value, so we convert those to an NaN value instead
+    return depth ? kDepthScale * depth : std::numeric_limits<double>::signaling_NaN();
 }
+
+std::vector<Point3d> ToSpatial(const Camera& camera, const gray16c_view_t& frame,
+                               const std::vector<Point2f>& points) {
+    const float sigma = 1.0f;
+
+    size_t window = static_cast<size_t>(roundf(sigma * 3)) * 2 + 1;
+    auto smoothing = boost::gil::generate_gaussian_kernel(window, sigma);
+
+    gray16_image_t smoothed(frame.dimensions());
+    boost::gil::detail::convolve_2d(frame, smoothing, view(smoothed));
+
+    auto smoothed_frame = const_view(smoothed); 
+    std::vector<Point3d> result;
+
+    for (const auto& point: points) {
+        auto z = DepthForPixel(smoothed_frame, point);
+        result.push_back(camera.PixelToCamera(point, z));
+    }
+
+    return result;
+}
+
+} // namespace 
 
 /// Instance of a perspective and point problem for two sets of point generated with
 /// an RGB-D camera.
@@ -156,6 +192,38 @@ public:
         }
 
         return residual;
+    }
+
+    Result<double> SolveLevenberg(SE3d& pose, std::vector<Point3d>& points, unsigned max_iterations = 10, 
+                                  double lambda = 0.1) {
+        // Reconstruct pose and locations; using true locations and identity pose as starting point
+        Eigen::VectorXd variables(points.size() * 3 + 6);
+
+        for (size_t index = 0; index < points.size(); ++index) {
+            variables(Eigen::seqN(index * 3 + 6, 3)) = points[index];
+        }
+
+        variables(Eigen::seqN(0, 6)) = pose.log();
+
+        using namespace std::placeholders;
+
+        auto result = 
+            LevenbergMarquardt(std::bind(&PerspectiveAndPoint3d::CalculateJacobian, *this, _1),
+                                std::bind(&PerspectiveAndPoint3d::CalculateResidual, *this, _1),
+                                variables, max_iterations, lambda);
+
+        EXPECT_TRUE(result.ok());
+
+        if (result.ok()) {
+            // extract the optimization result
+            pose = SE3d::exp(variables(Eigen::seqN(0, 6)));
+
+            for (size_t index = 0; index < points.size(); ++index) {
+                points[index] = variables(Eigen::seqN(index * 3 + 6, 3));
+            }
+        }
+
+        return result;
     }
 
 private:
@@ -324,4 +392,242 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
     }
 }
 
+namespace {
 
+void CreateRandomIndices(std::vector<size_t>& indices, std::default_random_engine& random_engine) {
+    std::iota(begin(indices), end(indices), 0);
+    std::shuffle(begin(indices), end(indices), random_engine);
+}
+
+template <class Element>
+std::vector<Element> Subset(const std::vector<Element>& all, const std::vector<size_t>& indices, size_t sample_size) {
+    std::vector<Element> result;
+
+    for (size_t index = 0; index < sample_size; ++index) {
+        result.push_back(all[indices[index]]);
+    }
+
+    return result;
+}
+
+Result<double> Ransac(SE3d& pose, const std::vector<Point3d>& points, 
+                      const PerspectiveAndPoint3d::PointPairs& point_pairs,
+                      const StereoDepthCamera& first_camera, const StereoDepthCamera& second_camera,
+                      size_t sample_size, unsigned max_iterations, double lambda, double threshold,
+                      std::default_random_engine& random_engine) {
+    std::vector<size_t> indices(points.size());
+
+    unsigned max_additional_inliers = 0;
+    std::vector<size_t> max_inlier_indices, candidate_inlier_indices;
+
+    for (unsigned iter = max_iterations; iter--;) {
+        // Create a random index permutation; the prefix of sample_size elements will serve as sample
+        CreateRandomIndices(indices, random_engine);
+        auto sample_points = Subset(points, indices, sample_size);
+        auto sample_point_pairs = Subset(point_pairs, indices, sample_size);
+
+        // Create an instance based on the sample set
+        PerspectiveAndPoint3d instance(first_camera, second_camera, sample_point_pairs);
+
+        // Calculate the solution for the sample instance
+        SE3d instance_pose = pose;
+        auto result = instance.SolveLevenberg(instance_pose, sample_points, max_iterations, lambda);
+
+        if (!result.ok()) {
+            // didn't yield a solvable instance
+            continue;
+        }
+
+        // Determine the number of inliers not countained in the sample set; here we need to back project
+        // the first meassurement into world space, then transform it via the computed camera pose and compare
+        // the error against the second measurement
+        unsigned num_additional_inliers = 0;
+        candidate_inlier_indices.clear();
+
+        for (size_t index = sample_size; index < points.size(); ++index) {
+            const auto& point_pair = point_pairs[indices[index]];
+            auto prediction = 
+                second_camera.CameraToPixelDisparity(instance_pose *
+                                                     first_camera.PixelDisparityToCamera(point_pair.first));
+
+            double error = (point_pair.second - prediction).squaredNorm();
+
+            if (error <= threshold) {
+                num_additional_inliers++;
+                candidate_inlier_indices.push_back(indices[index]);
+            }
+        }
+
+        if (num_additional_inliers && num_additional_inliers > max_additional_inliers) {
+            max_additional_inliers = num_additional_inliers;
+            max_inlier_indices = candidate_inlier_indices;
+
+            std::copy(indices.begin(), indices.begin() + sample_size, std::back_insert_iterator(max_inlier_indices));
+        }
+    }
+
+    if (max_additional_inliers) {
+        auto robust_points = Subset(points, max_inlier_indices, max_inlier_indices.size());
+        auto robust_point_pairs = Subset(point_pairs, max_inlier_indices, max_inlier_indices.size());
+        PerspectiveAndPoint3d instance(first_camera, second_camera, robust_point_pairs);
+        return instance.SolveLevenberg(pose, robust_points, max_iterations, lambda);
+    } else {
+        PerspectiveAndPoint3d instance(first_camera, second_camera, point_pairs);
+        std::vector<Point3d> temp_points(points);
+        return instance.SolveLevenberg(pose, temp_points, max_iterations, lambda);
+    }
+}
+
+} // namespace
+
+TEST(OptimizerTest, PoseFromFeatures) {
+    using namespace boost::gil;
+
+    // ICP iteration limit
+    size_t max_iterations = 30;
+    
+    // ICP sample size
+    size_t sample_size = 10;
+    
+    /// ICP outlier threshold
+    double outlier_threshold = 1.0;
+
+    std::default_random_engine random_engine(12345);
+
+    std::string kDataSetPath("data/cafe1-1");
+    
+    Result<SensorInfo> sensor_info_result = ReadSensorInfo(kDataSetPath);
+    EXPECT_TRUE(sensor_info_result.ok());
+    auto sensor_info = sensor_info_result.value();
+
+    StereoDepthCamera depth_camera = CreateAlignedStereoDepthCamera(sensor_info.d400_depth_optical_frame, 0.05, SE3d());
+
+    std::string kSourceInputPath("data/cafe1-1/aligned_depth/1560004885.446165.png");
+    //std::string kTargetInputPath("data/cafe1-1/aligned_depth/1560004886.446849.png");
+    std::string kTargetInputPath("data/cafe1-1/aligned_depth/1560004887.013907.png");
+
+    // #Time px py pz qx qy qz qw
+    // 1560004885.44099879 21.37940216064453 21.128952026367188 0.0 0.0 0.0 -0.30020832668341807 0.9538736607066692
+    // 1560004886.44052076 21.386783599853516 21.11459732055664 0.0 0.0 0.0 -0.3022010165694693 0.9532442213747636
+    // 1560004887.01535177 21.385334014892578 21.11564826965332 0.0 0.0 0.0 -0.30227737870033583 0.9532200094028944
+
+    gray16_image_t source_input, target_input;
+    read_image(kSourceInputPath, source_input, png_tag{});
+    read_image(kTargetInputPath, target_input, png_tag{});
+
+    std::vector<Point2f> source_points = {
+        Point2f(372, 232),         Point2f(368, 240),
+        Point2f(352, 280),         Point2f(311.127, 234.759),
+        Point2f(420, 228),         /*Point2f(285.671, 322.441),*/
+        Point2f(336.583, 285.671), Point2f(620, 208),
+        Point2f(300, 236),         /*Point2f(336.583, 316.784),*/
+        /*Point2f(704, 324),*/         Point2f(356, 292),
+        Point2f(404, 148),         Point2f(610, 234),
+        /*Point2f(652, 104),*/         Point2f(418.607, 237.588),
+        Point2f(352, 272),         Point2f(316, 244),
+        Point2f(370, 300),         Point2f(292, 276),
+        Point2f(358, 300),         Point2f(328, 168),
+        Point2f(684, 112),         Point2f(352, 336),
+        Point2f(720, 344),         Point2f(622.254, 79.196),
+        /*Point2f(345.068, 254.558),*/ /*Point2f(707.107, 330.926),*/
+        Point2f(380, 132),         Point2f(356, 400),
+        /*Point2f(296, 316),*/         Point2f(333.754, 200.818),
+        Point2f(328.098, 175.362), Point2f(708, 156),
+        Point2f(325.269, 285.671), Point2f(256, 248),
+        Point2f(695.793, 104.652), Point2f(792, 248),
+        Point2f(299.813, 299.813), Point2f(364, 250),
+        Point2f(408, 268),         Point2f(200, 232),
+        Point2f(257.387, 313.955), Point2f(344, 244),
+        Point2f(676, 284),         Point2f(421.436, 253.144),
+        /*Point2f(452.548, 322.441),*/ Point2f(296, 256),
+        Point2f(348, 224)
+    };
+
+    std::vector<Point2f> target_points = {
+        Point2f(365.061, 230.996), Point2f(361.496, 238.838),
+        Point2f(348.167, 279.567), Point2f(307.692, 233.694),
+        Point2f(416.851, 226.734), /*Point2f(280.675, 321.57),*/
+        Point2f(333.135, 284.835), Point2f(622.131, 204.714),
+        Point2f(296.393, 233.275), /*Point2f(332.399, 315.882),*/
+        /*Point2f(702.208, 322.853),*/ Point2f(352.65, 290.952),
+        Point2f(400.582, 146.884), Point2f(601.865, 224.568),
+        /*Point2f(653.951, 101.983),*/ Point2f(415.215, 237.144),
+        Point2f(348.062, 271.404), Point2f(312.694, 242.996),
+        Point2f(366.36, 299.459),  Point2f(288.131, 275.088),
+        Point2f(354.403, 298.186), Point2f(324.751, 166.939),
+        Point2f(681.287, 110.982), Point2f(347.431, 335.237),
+        Point2f(717.785, 343.487), Point2f(630.973, 76.1746),
+        /*Point2f(341.592, 253.424),*/ /*Point2f(704.922, 329.642),*/
+        Point2f(376.707, 130.859), Point2f(351.726, 399.863),
+        /*Point2f(291.599, 315.185),*/ Point2f(330.337, 199.391),
+        Point2f(324.395, 174.067), Point2f(704.974, 154.918),
+        Point2f(321.719, 284.578), Point2f(251.991, 247.178),
+        Point2f(692.747, 103.471), Point2f(788.897, 247.241),
+        Point2f(296.252, 299.118), Point2f(358.315, 250.245),
+        Point2f(404.556, 266.896), Point2f(195.985, 230.787),
+        Point2f(252.838, 313.211), Point2f(340.375, 242.485),
+        Point2f(673.121, 282.322), Point2f(418.119, 252.123),
+        /*Point2f(449.117, 321.78),*/  Point2f(292.101, 255.078),
+        Point2f(344.338, 223.113)
+    };
+
+    ASSERT_EQ(source_points.size(), target_points.size());
+
+    auto source_spatial = ToSpatial(depth_camera, const_view(source_input), source_points);
+    auto target_spatial = ToSpatial(depth_camera, const_view(target_input), target_points);
+
+    {
+        std::vector<double> differences;
+        double sum = 0;
+        for (size_t index = 0; index < source_spatial.size(); ++index) {
+            double diff = target_spatial[index].z() - source_spatial[index].z();
+            sum += diff;
+            differences.push_back(diff);
+        }
+
+        std::cout << "Average delta Z = " << (sum/source_spatial.size()) << std::endl;
+        std::sort(differences.begin(), differences.end());
+        std::cout << "Perc 25 delta Z = " << (differences[source_spatial.size() * 0.25]) << std::endl;
+        std::cout << "Perc 40 delta Z = " << (differences[source_spatial.size() * 0.40]) << std::endl;
+        std::cout << "Perc 50 delta Z = " << (differences[source_spatial.size() * 0.50]) << std::endl;
+        std::cout << "Perc 60 delta Z = " << (differences[source_spatial.size() * 0.60]) << std::endl;
+        std::cout << "Perc 75 delta Z = " << (differences[source_spatial.size() * 0.75]) << std::endl;
+    }
+
+    std::vector<uchar> mask(source_spatial.size(), 255);
+
+    // Project points using camera and pose and camera
+    PerspectiveAndPoint3d::PointPairs point_pairs;
+
+    for (size_t index = 0; index < source_spatial.size(); ++index) {
+        point_pairs.emplace_back(depth_camera.CameraToPixelDisparity(source_spatial[index]), 
+                                 depth_camera.CameraToPixelDisparity(target_spatial[index]));
+    }
+
+    SE3d calculated_pose;
+    auto result = 
+        Ransac(calculated_pose, source_spatial, point_pairs, depth_camera, depth_camera, 10, 10, 0.1, 1.0, random_engine);
+    EXPECT_TRUE(result.ok());
+
+    // Reconstructed pose should match preset pose
+    const double kEpsilon = 0.00001;
+
+    SE3d relative_motion = calculated_pose.inverse();
+
+    // Now compare the calculated distance and compare to the baseline; 0.0145663
+    Vector3d source_pos(21.37940216064453, 21.128952026367188, 0.0);
+    Quaterniond source_rot(0.9538736607066692, 0.0, 0.0, -0.30020832668341807);
+    Vector3d target_pos(21.385334014892578, 21.11564826965332, 0.0);
+    Quaterniond target_rot(0.9532200094028944, 0.0, 0.0, -0.30227737870033583);
+
+    // 0.0145663
+    auto true_distance = (target_pos - source_pos).norm();
+
+    // 0.0354442
+    auto estimated_distance = relative_motion.translation().norm();
+
+    std::cout << "Estimated rotation: " << relative_motion.unit_quaternion().coeffs() << std::endl;
+    std::cout << "True rotation: " << (target_rot * source_rot.inverse()).coeffs() << std::endl;
+
+    EXPECT_EQ(estimated_distance, true_distance);
+}
