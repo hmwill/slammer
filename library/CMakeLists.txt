@@ -32,7 +32,6 @@ add_executable(test_slammer_lib
   tests/imu_test.cpp 
   tests/math_test.cpp
   tests/keyframe_index_test.cpp
-  tests/pose_test.cpp
   tests/optimizer_test.cpp
   tests/orb_test.cpp
   tests/utility_test.cpp
