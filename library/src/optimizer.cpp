@@ -73,15 +73,15 @@ Result<double>
 slammer::LevenbergMarquardt(const Jacobian& jacobian_function, const Residual& residual_function,
                             Eigen::VectorXd& value,
                             unsigned max_iterations, double lambda) {    
+    auto residual = residual_function(value);
+    auto error = residual.squaredNorm();
+    auto jacobian = jacobian_function(value);
+
     while (max_iterations--) {
-        auto jacobian = jacobian_function(value);
         auto dim = jacobian.cols();
         Eigen::SparseMatrix<double> lambda_identity(dim, dim);
         lambda_identity.setIdentity();
         lambda_identity *= lambda;
-
-        auto residual = residual_function(value);
-        auto error = residual.squaredNorm();
 
         // std::cout << "Value = " << value.transpose() << std::endl;
         // std::cout << "Residual = " << residual.transpose() << std::endl;
@@ -103,9 +103,20 @@ slammer::LevenbergMarquardt(const Jacobian& jacobian_function, const Residual& r
         }
 
         // std::cout << "Delta = " << delta.transpose() << std::endl;
-        value -= delta;
+        auto candidate_value = value - delta;
+        auto candidate_residual = residual_function(candidate_value);
+        auto candidate_error = candidate_residual.squaredNorm();
+
+        if (candidate_error < error) {
+            value = candidate_value;
+            residual = candidate_residual;
+            error = candidate_error;
+            jacobian = jacobian_function(value);
+            lambda *= 0.1;
+        } else {
+            lambda *= 10;
+        }
     }
 
-    auto residual = residual_function(value);
-    return residual.squaredNorm();
+    return error;
 }

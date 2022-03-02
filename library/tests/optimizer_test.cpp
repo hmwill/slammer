@@ -295,7 +295,7 @@ TEST(OptimizerTest, ReconstructPoseNoError) {
                             variables, 10) :
                 LevenbergMarquardt(std::bind(&PerspectiveAndPoint3d::CalculateJacobian, &instance, _1),
                                    std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
-                                   variables, 10, 0.1);
+                                   variables, 10, 0.01);
 
         EXPECT_TRUE(result.ok());
 
@@ -378,7 +378,7 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
                             variables, 10) :
                 LevenbergMarquardt(std::bind(&PerspectiveAndPoint3d::CalculateJacobian, &instance, _1),
                                    std::bind(&PerspectiveAndPoint3d::CalculateResidual, &instance, _1),
-                                   variables, 10, 0.1);
+                                   variables, 10, 0.01);
 
         EXPECT_TRUE(result.ok());
 
@@ -610,7 +610,7 @@ TEST(OptimizerTest, PoseFromFeatures) {
 
     SE3d calculated_pose;
     auto result = 
-        Ransac(calculated_pose, source_spatial, point_pairs, depth_camera, depth_camera, 10, 10, 0.1, 1.0, random_engine);
+        Ransac(calculated_pose, source_spatial, point_pairs, depth_camera, depth_camera, 10, 10, 0.01, 1.0, random_engine);
     EXPECT_TRUE(result.ok());
 
     // Reconstructed pose should match preset pose
