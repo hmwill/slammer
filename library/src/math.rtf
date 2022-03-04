@@ -1,309 +1,0 @@
-{\rtf\ansi\deff0
-{\fonttbl{\f0\fswiss Courier New;}}
-{\colortbl;\red0\green0\blue0;\red64\green64\blue64;\red127\green127\blue127;\red191\green191\blue191;\red217\green217\blue217;\red229\green229\blue229;\red242\green242\blue242;\red0\green0\blue255;\red95\green158\blue160;\red184\green134\blue11;\red85\green107\blue47;\red178\green34\blue34;\red34\green139\blue34;\red0\green255\blue0;\red218\green112\blue214;\red160\green32\blue240;\red255\green0\blue0;\red188\green143\blue143;\red143\green188\blue143;\red193\green255\blue193;\red180\green238\blue180;\red155\green205\blue155;\red105\green139\blue105;\red237\green218\blue116;\red67\green183\blue186;\red100\green233\blue134;\red247\green101\blue65;\red154\green254\blue255;\red211\green211\blue211;}
-// BSD 3-Clause License\line
-//\line
-// Copyright (c) 2021, Hans-Martin Will\line
-// All rights reserved.\line
-//\line
-// Redistribution and use in source and binary forms, with or without\line
-// modification, are permitted provided that the following conditions are met:\line
-//\line
-// 1. Redistributions of source code must retain the above copyright notice, this\line
-//    list of conditions and the following disclaimer.\line
-//\line
-// 2. Redistributions in binary form must reproduce the above copyright notice,\line
-//    this list of conditions and the following disclaimer in the documentation\line
-//    and/or other materials provided with the distribution.\line
-//\line
-// 3. Neither the name of the copyright holder nor the names of its\line
-//    contributors may be used to endorse or promote products derived from\line
-//    this software without specific prior written permission.\line
-//\line
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"\line
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE\line
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\line
-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE\line
-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL\line
-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR\line
-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER\line
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,\line
-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE\line
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\line
-\line
-#include "slammer/math.h"\line
-\line
-#include <algorithm>\line
-#include <numeric>\line
-\line
-#include "Eigen/SVD"\line
-\line
-#include "g2o/types/slam3d/types_slam3d.h"\line
-#include "g2o/core/sparse_optimizer.h"\line
-#include "g2o/core/block_solver.h"\line
-#include "g2o/core/robust_kernel.h"\line
-#include "g2o/core/robust_kernel_impl.h"\line
-#include "g2o/core/optimization_algorithm_levenberg.h"\line
-#include "g2o/solvers/cholmod/linear_solver_cholmod.h"\line
-#include "g2o/solvers/eigen/linear_solver_eigen.h"\line
-\line
-using namespace slammer;\line
-\line
-\line
-namespace \{\line
-\line
-void CreateRandomIndices(std::vector<size_t>& indices, std::default_random_engine& random_engine) \{\line
-    std::iota(begin(indices), end(indices), 0);\line
-    std::shuffle(begin(indices), end(indices), random_engine);\line
-\}\line
-\line
-inline g2o::Isometry3 IsometryFromSE3d(const SE3d& se3d) \{\line
-    auto rotation = se3d.unit_quaternion();\line
-    auto translation = se3d.translation();\line
-    return Eigen::Translation3d(translation) * Eigen::AngleAxisd(rotation);\line
-\}\line
-\line
-double EstimateVariance(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,\line
-                        const SE3d& transformation) \{\line
-    double sum = 0;\line
-    auto size = reference.size();\line
-\line
-    for (size_t index = 0; index < size; ++index) \{\line
-        Point3d diff = transformed[index] - transformation * reference[index];\line
-        sum += diff.squaredNorm();\line
-    \}\line
-\line
-    return sum / (size - 1);\line
-\}\line
-\line
-\} // namespace\line
-\line
-\line
-SE3d slammer::CalculateIcp(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed) \{\line
-    using std::begin, std::end;\line
-\line
-    size_t num_elements = reference.size();\line
-    assert(transformed.size() == num_elements);\line
-    double factor = 1.0 / num_elements;\line
-\line
-    // Calculate the centroids of the two point clouds\line
-    Point3d centroid_reference = std::accumulate(begin(reference), end(reference), Point3d(0.0, 0.0, 0.0)) * factor;\line
-    Point3d centroid_transformed = std::accumulate(begin(transformed), end(transformed), Point3d(0.0, 0.0, 0.0)) * factor;\line
-\line
-    // Calculate adjusted coordinates for each point cloud, where the centroid has been moved to the origin\line
-    std::vector<Eigen::Vector3d> shifted_reference, shifted_transformed;\line
-    shifted_reference.reserve(num_elements);\line
-    shifted_transformed.reserve(num_elements);\line
-\line
-    std::transform(begin(reference), end(reference), std::back_inserter(shifted_reference),\line
-                   [&](const Point3d& coord) \{ return coord - centroid_reference; \});\line
-    std::transform(begin(transformed), end(transformed), std::back_inserter(shifted_transformed),\line
-                   [&](const Point3d& coord) \{ return coord - centroid_transformed; \});\line
-\line
-    // Calculate the error matrix for point rotations\line
-    Eigen::Matrix3d W = Eigen::Matrix3d::Zero();\line
-\line
-    for (size_t index = 0; index < num_elements; ++index) \{\line
-        W += shifted_transformed[index] * shifted_reference[index].transpose();\line
-    \}\line
-\line
-    // Compute the SVD\line
-    Eigen::JacobiSVD<Eigen::Matrix3d> svd(W, Eigen::ComputeFullU | Eigen::ComputeFullV);\line
-    const auto& U = svd.matrixU();\line
-    const auto& V = svd.matrixV();\line
-\line
-    // Extract the transformation components\line
-    Eigen::Matrix3d rotation = U * V.transpose();\line
-\line
-    if (rotation.determinant() < 0) \{\line
-        rotation = -rotation;\line
-    \}\line
-\line
-    Eigen::Vector3d translation = centroid_transformed - rotation * centroid_reference;\line
-    return SE3d(rotation, translation);\line
-\}\line
-\line
-size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,\line
-                          std::default_random_engine& random_engine,\line
-                          SE3d& best_estimate, std::vector<uchar>& inlier_mask,\line
-                          size_t max_iterations, size_t sample_size, double threshold,\line
-                          size_t min_additional_inliers) \{\line
-    size_t num_points = reference.size();\line
-    assert(transformed.size() == num_points);\line
-\line
-    inlier_mask.clear();\line
-    size_t best_num_inliers = 0;\line
-    double best_variance = std::numeric_limits<double>::max();\line
-    inlier_mask.resize(num_points, 0);\line
-\line
-    if (num_points > sample_size + min_additional_inliers) \{\line
-        std::vector<size_t> indices(num_points);\line
-        std::vector<uchar> inliers(num_points);\line
-        std::vector<Point3d> sample_reference, sample_transformed;\line
-        sample_reference.reserve(sample_size);\line
-        sample_transformed.reserve(sample_size);\line
-\line
-        for (size_t num_iteration = 0; num_iteration < max_iterations; ++num_iteration) \{\line
-            CreateRandomIndices(indices, random_engine);\line
-            sample_reference.clear();\line
-            sample_transformed.clear();\line
-            std::fill(inliers.begin(), inliers.end(), 0);\line
-\line
-            for (size_t index = 0; index < sample_size; ++index) \{\line
-                sample_reference.push_back(reference[indices[index]]);\line
-                sample_transformed.push_back(transformed[indices[index]]);\line
-                inliers[indices[index]] = std::numeric_limits<uchar>::max();\line
-            \}\line
-\line
-            SE3d estimate = CalculateIcp(sample_reference, sample_transformed);\line
-            size_t num_additonal_inliers = 0;\line
-\line
-            for (size_t index = 0; index < num_points; ++index) \{\line
-                if (inliers[index]) \{\line
-                    continue;\line
-                \}\line
-\line
-                Point3d diff = transformed[index] - estimate * reference[index];\line
-                double squared_distance = diff.squaredNorm();\line
-\line
-                bool is_inlier = squared_distance < threshold;\line
-                inliers[index] = is_inlier ? std::numeric_limits<uchar>::max() : 0;\line
-                num_additonal_inliers += is_inlier;\line
-            \}\line
-\line
-            std::cout << "Translation: " << estimate.translation().norm() \line
-                      << " Inliers: " << num_additonal_inliers\line
-                      << std::endl;\line
-\line
-            if (num_additonal_inliers >= min_additional_inliers) \{\line
-                sample_reference.clear();\line
-                sample_transformed.clear();\line
-\line
-                for (size_t index = 0; index < num_points; ++index) \{\line
-                    if (inliers[index]) \{\line
-                        sample_reference.push_back(reference[index]);\line
-                        sample_transformed.push_back(transformed[index]);\line
-                    \}\line
-                \}\line
-\line
-                SE3d estimate = CalculateIcp(sample_reference, sample_transformed);             \line
-                double variance = EstimateVariance(sample_reference, sample_transformed, estimate);\line
-\line
-                if (variance < best_variance) \{\line
-                    best_variance = variance;\line
-                    best_num_inliers = num_additonal_inliers + sample_size;\line
-                    best_estimate = estimate;\line
-                    inlier_mask = inliers;\line
-                \}\line
-            \}\line
-        \}\line
-    \}\line
-\line
-    if (!best_num_inliers) \{\line
-        best_estimate = CalculateIcp(reference, transformed);\line
-        inlier_mask.resize(num_points, std::numeric_limits<uchar>::max());\line
-    \}\line
-\line
-    return best_num_inliers;\line
-\}\line
-\line
-SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,\line
-                                const std::vector<uchar>& mask, const Camera& camera, double baseline, size_t iterations) \{\line
-    g2o::SparseOptimizer optimizer;\line
-\line
-    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;\line
-    typedef g2o::LinearSolverCholmod<BlockSolverType::PoseMatrixType> LinearSolverType;\line
-\line
-    auto algorithm = new g2o::OptimizationAlgorithmLevenberg(\line
-        g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));\line
-\line
-    optimizer.setAlgorithm(algorithm);\line
-    optimizer.setVerbose(false);\line
-\line
-    // add the point coordinates\line
-    for (size_t index = 0; index < reference.size(); ++index) \{\line
-        if (!mask[index]) \{\line
-            continue;\line
-        \}\line
-\line
-        auto point = new g2o::VertexPointXYZ();\line
-        point->setId(index);\line
-        point->setMarginalized(true);\line
-        point->setEstimate(reference[index]);\line
-        optimizer.addVertex(point);\line
-    \}\line
-\line
-    // We have two camera vertices; one of them fixed at the origin\line
-    size_t origin_index = reference.size();\line
-    auto origin_pose = new g2o::VertexSE3();\line
-    origin_pose->setId(origin_index);\line
-    origin_pose->setEstimate(IsometryFromSE3d(SE3d()));\line
-    origin_pose->setFixed(true);\line
-    optimizer.addVertex(origin_pose);\line
-\line
-    size_t transformed_index = origin_index + 1;\line
-    auto transformed_pose = new g2o::VertexSE3();\line
-    transformed_pose->setId(transformed_index);\line
-    transformed_pose->setEstimate(IsometryFromSE3d(SE3d()));\line
-    transformed_pose->setFixed(false);\line
-    optimizer.addVertex(transformed_pose);\line
-\line
-    auto camera_parameters = new g2o::ParameterCamera();\line
-    camera_parameters->setId(0);\line
-    camera_parameters->setKcam(camera.fx(), camera.fy(), 0.0, 0.0 /*camera.cx(), camera.cy()*/);\line
-    // camera_parameters->setKcam(camera.fx(), camera.fy(), camera.cx(), camera.cy());\line
-    //camera_parameters->setBaseline(baseline);\line
-    optimizer.addParameter(camera_parameters);\line
-\line
-    // using EdgeType = g2o::EdgeSE3PointXYZDisparity;\line
-    using EdgeType = g2o::EdgeSE3PointXYZ;\line
-\line
-    EdgeType::InformationType information;\line
-    // information <<\line
-    //     1.0, 0.0, 0.0, \line
-    //     0.0, 1.0, 0.0,\line
-    //     0.0, 0.0, 1000.0 * camera.fx() * baseline;\line
-\line
-    for (size_t index = 0; index < reference.size(); ++index) \{\line
-        if (!mask[index]) \{\line
-            continue;\line
-        \}\line
-\line
-        auto edge = new EdgeType();\line
-        edge->setVertex(0, optimizer.vertex(origin_index));\line
-        edge->setVertex(1, optimizer.vertex(index));\line
-        edge->setInformation(information);\line
-\line
-        edge->setParameterId(0, 0);\line
-        edge->setRobustKernel(new g2o::RobustKernelHuber());\line
-        optimizer.addEdge(edge);\line
-        edge->setMeasurementFromState();\line
-\line
-        edge = new EdgeType();\line
-        edge->setVertex(0, optimizer.vertex(transformed_index));\line
-        edge->setVertex(1, optimizer.vertex(index));\line
-        edge->setInformation(information);\line
-\line
-        edge->setParameterId(0, 0);\line
-        edge->setRobustKernel(new g2o::RobustKernelHuber());\line
-        auto camera_pt = camera.CameraToPixel(transformed[index]);\line
-        // Point3d measurement(camera_pt.x - camera.cx(), camera_pt.y - camera.cy(), 1.0/transformed[index].z());\line
-        // Point3d measurement(camera_pt.x, camera_pt.y, 1.0/transformed[index].z()); //camera.fx() * baseline\line
-        Point3d measurement(transformed[index]);\line
-        optimizer.addEdge(edge);\line
-        edge->setMeasurement(measurement);\line
-    \}\line
-\line
-    // Perform the actual optimization\line
-    optimizer.setVerbose(false); // while debugging\line
-    optimizer.initializeOptimization();\line
-    optimizer.optimize(iterations);\line
-\line
-    // retrieve results\line
-    auto vertex = dynamic_cast<g2o::VertexSE3 *>(optimizer.vertex(transformed_index));\line
-    auto isometry = vertex->estimate();\line
-    auto rotation = isometry.rotation();\line
-    auto translation = isometry.translation();\line
-\line
-    return SE3d(rotation, translation);\line
-\}}
