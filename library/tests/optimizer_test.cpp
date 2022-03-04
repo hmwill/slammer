@@ -97,7 +97,23 @@ std::vector<Point3d> ToSpatial(const Camera& camera, const gray16c_view_t& frame
     return result;
 }
 
-} // namespace 
+void CreateRandomIndices(std::vector<size_t>& indices, std::default_random_engine& random_engine) {
+    std::iota(begin(indices), end(indices), 0);
+    std::shuffle(begin(indices), end(indices), random_engine);
+}
+
+template <class Element>
+std::vector<Element> Subset(const std::vector<Element>& all, const std::vector<size_t>& indices, size_t sample_size) {
+    std::vector<Element> result;
+
+    for (size_t index = 0; index < sample_size; ++index) {
+        result.push_back(all[indices[index]]);
+    }
+
+    return result;
+}
+
+} // namespace
 
 /// Instance of a perspective and point problem for two sets of point generated with
 /// an RGB-D camera.
@@ -230,6 +246,88 @@ public:
         }
 
         return result;
+    }
+
+    Result<double> Ransac(SE3d& pose, std::vector<uchar>& inlier_mask, const std::vector<Point3d>& points, 
+                          size_t sample_size, unsigned max_iterations, double lambda, double threshold,
+                          std::default_random_engine& random_engine) {
+        std::vector<size_t> indices(points.size());
+
+        unsigned max_additional_inliers = 0;
+        std::vector<size_t> max_inlier_indices, candidate_inlier_indices;
+
+        for (unsigned iter = max_iterations; iter--;) {
+            // Create a random index permutation; the prefix of sample_size elements will serve as sample
+            CreateRandomIndices(indices, random_engine);
+            auto sample_points = Subset(points, indices, sample_size);
+            auto sample_point_pairs = Subset(point_pairs_, indices, sample_size);
+
+            // Create an instance based on the sample set
+            PerspectiveAndPoint3d instance(first_, second_, sample_point_pairs);
+
+            // Calculate the solution for the sample instance
+            SE3d instance_pose = pose;
+            auto result = instance.SolveLevenberg(instance_pose, sample_points, max_iterations, lambda);
+
+            if (!result.ok()) {
+                // didn't yield a solvable instance
+                continue;
+            }
+
+            // Determine the number of inliers not countained in the sample set; here we need to back project
+            // the first meassurement into world space, then transform it via the computed camera pose and compare
+            // the error against the second measurement
+            unsigned num_additional_inliers = 0;
+            candidate_inlier_indices.clear();
+
+            for (size_t index = 0; index < points.size(); ++index) {
+                const auto& point_pair = point_pairs_[indices[index]];
+                auto prediction = 
+                    second_.CameraToPixelDisparity(instance_pose *
+                                                   first_.PixelDisparityToCamera(point_pair.first));
+
+                double error = (point_pair.second - prediction).squaredNorm();
+
+                if (index < sample_size) {
+                    if (error > threshold) {
+                        break;
+                    }
+                } else {
+                    if (error <= threshold) {
+                        num_additional_inliers++;
+                        candidate_inlier_indices.push_back(indices[index]);
+                    }
+                }
+            }
+
+            if (num_additional_inliers && num_additional_inliers > max_additional_inliers) {
+                max_additional_inliers = num_additional_inliers;
+                max_inlier_indices = candidate_inlier_indices;
+
+                std::copy(indices.begin(), indices.begin() + sample_size, std::back_insert_iterator(max_inlier_indices));
+            }
+        }
+
+        inlier_mask.clear();
+
+        if (max_additional_inliers) {
+            inlier_mask.resize(points.size(), 0);
+
+            for (auto index: max_inlier_indices) {
+                inlier_mask[index] = ~0;
+            }
+
+            auto robust_points = Subset(points, max_inlier_indices, max_inlier_indices.size());
+            auto robust_point_pairs = Subset(point_pairs_, max_inlier_indices, max_inlier_indices.size());
+            PerspectiveAndPoint3d instance(first_, second_, robust_point_pairs);
+
+            return instance.SolveLevenberg(pose, robust_points, max_iterations, lambda);
+        } else {
+            inlier_mask.resize(points.size(), ~0);
+            PerspectiveAndPoint3d instance(first_, second_, point_pairs_);
+            std::vector<Point3d> temp_points(points);
+            return instance.SolveLevenberg(pose, temp_points, max_iterations, lambda);
+        }
     }
 
 private:
@@ -398,94 +496,6 @@ TEST(OptimizerTest, ReconstructPoseWithError) {
     }
 }
 
-namespace {
-
-void CreateRandomIndices(std::vector<size_t>& indices, std::default_random_engine& random_engine) {
-    std::iota(begin(indices), end(indices), 0);
-    std::shuffle(begin(indices), end(indices), random_engine);
-}
-
-template <class Element>
-std::vector<Element> Subset(const std::vector<Element>& all, const std::vector<size_t>& indices, size_t sample_size) {
-    std::vector<Element> result;
-
-    for (size_t index = 0; index < sample_size; ++index) {
-        result.push_back(all[indices[index]]);
-    }
-
-    return result;
-}
-
-Result<double> Ransac(SE3d& pose, const std::vector<Point3d>& points, 
-                      const PerspectiveAndPoint3d::PointPairs& point_pairs,
-                      const StereoDepthCamera& first_camera, const StereoDepthCamera& second_camera,
-                      size_t sample_size, unsigned max_iterations, double lambda, double threshold,
-                      std::default_random_engine& random_engine) {
-    std::vector<size_t> indices(points.size());
-
-    unsigned max_additional_inliers = 0;
-    std::vector<size_t> max_inlier_indices, candidate_inlier_indices;
-
-    for (unsigned iter = max_iterations; iter--;) {
-        // Create a random index permutation; the prefix of sample_size elements will serve as sample
-        CreateRandomIndices(indices, random_engine);
-        auto sample_points = Subset(points, indices, sample_size);
-        auto sample_point_pairs = Subset(point_pairs, indices, sample_size);
-
-        // Create an instance based on the sample set
-        PerspectiveAndPoint3d instance(first_camera, second_camera, sample_point_pairs);
-
-        // Calculate the solution for the sample instance
-        SE3d instance_pose = pose;
-        auto result = instance.SolveLevenberg(instance_pose, sample_points, max_iterations, lambda);
-
-        if (!result.ok()) {
-            // didn't yield a solvable instance
-            continue;
-        }
-
-        // Determine the number of inliers not countained in the sample set; here we need to back project
-        // the first meassurement into world space, then transform it via the computed camera pose and compare
-        // the error against the second measurement
-        unsigned num_additional_inliers = 0;
-        candidate_inlier_indices.clear();
-
-        for (size_t index = sample_size; index < points.size(); ++index) {
-            const auto& point_pair = point_pairs[indices[index]];
-            auto prediction = 
-                second_camera.CameraToPixelDisparity(instance_pose *
-                                                     first_camera.PixelDisparityToCamera(point_pair.first));
-
-            double error = (point_pair.second - prediction).squaredNorm();
-
-            if (error <= threshold) {
-                num_additional_inliers++;
-                candidate_inlier_indices.push_back(indices[index]);
-            }
-        }
-
-        if (num_additional_inliers && num_additional_inliers > max_additional_inliers) {
-            max_additional_inliers = num_additional_inliers;
-            max_inlier_indices = candidate_inlier_indices;
-
-            std::copy(indices.begin(), indices.begin() + sample_size, std::back_insert_iterator(max_inlier_indices));
-        }
-    }
-
-    if (max_additional_inliers) {
-        auto robust_points = Subset(points, max_inlier_indices, max_inlier_indices.size());
-        auto robust_point_pairs = Subset(point_pairs, max_inlier_indices, max_inlier_indices.size());
-        PerspectiveAndPoint3d instance(first_camera, second_camera, robust_point_pairs);
-        return instance.SolveLevenberg(pose, robust_points, max_iterations, lambda);
-    } else {
-        PerspectiveAndPoint3d instance(first_camera, second_camera, point_pairs);
-        std::vector<Point3d> temp_points(points);
-        return instance.SolveLevenberg(pose, temp_points, max_iterations, lambda);
-    }
-}
-
-} // namespace
-
 TEST(OptimizerTest, PoseFromFeatures) {
     using namespace boost::gil;
 
@@ -608,9 +618,12 @@ TEST(OptimizerTest, PoseFromFeatures) {
                                  depth_camera.CameraToPixelDisparity(target_spatial[index]));
     }
 
+    PerspectiveAndPoint3d instance(depth_camera, depth_camera, point_pairs);
+    std::vector<uchar> inliers;
+
     SE3d calculated_pose;
-    auto result = 
-        Ransac(calculated_pose, source_spatial, point_pairs, depth_camera, depth_camera, 10, 10, 0.01, 1.0, random_engine);
+    const double kThreshold = 7.18;
+    auto result = instance.Ransac(calculated_pose, inliers, source_spatial, 6, 10, 0.01, kThreshold, random_engine);
     EXPECT_TRUE(result.ok());
 
     // Reconstructed pose should match preset pose
@@ -633,5 +646,29 @@ TEST(OptimizerTest, PoseFromFeatures) {
     // std::cout << "Estimated rotation: " << relative_motion.unit_quaternion().coeffs() << std::endl;
     // std::cout << "True rotation: " << (target_rot * source_rot.inverse()).coeffs() << std::endl;
 
-    EXPECT_LE(fabs(estimated_distance - true_distance), 0.002);
+    // estimate vs atual is less than 1 cm
+    EXPECT_LE(fabs(estimated_distance - true_distance), 0.01);
+
+    for (size_t index = 0; index < source_points.size(); ++index) {
+        const auto& point_pair = point_pairs[index];
+        auto prediction = 
+            depth_camera.CameraToPixelDisparity(calculated_pose *
+                                                depth_camera.PixelDisparityToCamera(point_pair.first));
+
+        double error = (point_pair.second - prediction).squaredNorm();
+
+        if (!inliers[index]) {
+            EXPECT_GT(error, kThreshold);
+
+            if (error <= kThreshold) {
+                std::cout << "Invalid outlier at index " << index << std::endl;
+            }
+        } else {
+            EXPECT_LE(error, kThreshold);
+
+            if (error > kThreshold) {
+                std::cout << "Invalid inlier at index " << index << std::endl;
+            }
+        }
+    }
 }
