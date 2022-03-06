@@ -9,6 +9,7 @@ add_library(slammer_lib
   src/keyframe_index.cpp
   src/optimizer.cpp
   src/orb.cpp
+  src/pnp.cpp
   src/utility.cpp
   src/loris/driver.cpp src/loris/opencv_utils.cpp
 )
