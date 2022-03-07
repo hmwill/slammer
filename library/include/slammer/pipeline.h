@@ -48,7 +48,7 @@ class Pipeline {
 public:
     Pipeline(const RgbdFrontend::Parameters& frontend_parameters,
              const Backend::Parameters& backend_parameters,
-             Vocabulary&& vocabulary, Camera&& rgb_camera, Camera&& depth_camera,
+             Vocabulary&& vocabulary, Camera&& rgb_camera, StereoDepthCamera&& depth_camera,
              EventListenerList<ColorImageEvent>& color_source,
              EventListenerList<DepthImageEvent>& depth_source
 );
@@ -58,7 +58,7 @@ public:
 
 private:
     Camera rgb_camera_;
-    Camera depth_camera_;
+    StereoDepthCamera depth_camera_;
 
     Map map_;
 

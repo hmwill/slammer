@@ -374,7 +374,7 @@ TEST(OptimizerTest, PoseFromFeatures) {
 
     SE3d calculated_pose;
     const double kThreshold = 7.18;
-    auto result = instance.Ransac(calculated_pose, inliers, source_spatial, 6, 10, 0.01, kThreshold, random_engine);
+    auto result = instance.Ransac(calculated_pose, inliers, source_spatial, 10, 20, 0.01, kThreshold, random_engine);
     EXPECT_TRUE(result.ok());
 
     // Reconstructed pose should match preset pose
@@ -408,16 +408,19 @@ TEST(OptimizerTest, PoseFromFeatures) {
 
         double error = (point_pair.second - prediction).squaredNorm();
 
-        if (!inliers[index]) {
-            EXPECT_GT(error, kThreshold);
+        // inliers/outlier deparation within 20% around threshold
+        auto thresholdLow = kThreshold * 0.8, thresholdHigh = kThreshold * 1.2;
 
-            if (error <= kThreshold) {
+        if (!inliers[index]) {
+            EXPECT_GT(error, thresholdLow);
+
+            if (error <= thresholdLow) {
                 std::cout << "Invalid outlier at index " << index << std::endl;
             }
         } else {
-            EXPECT_LE(error, kThreshold);
+            EXPECT_LE(error, thresholdHigh);
 
-            if (error > kThreshold) {
+            if (error > thresholdHigh) {
                 std::cout << "Invalid inlier at index " << index << std::endl;
             }
         }

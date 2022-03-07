@@ -106,14 +106,17 @@ public:
         // the number of mimap levels to generate for optical flow calculation
         int flow_pyramid_levels = 4;
 
-        // ICP iteration limit
+        // RANSAC iteration limit
         size_t max_iterations = 30;
         
-        // ICP sample size
-        size_t sample_size = 10;
+        // RANSAC sample size
+        size_t sample_size = 6;
         
-        /// ICP outlier threshold
-        double outlier_threshold = 0.1;
+        /// RANSAC outlier threshold
+        double outlier_threshold = 7.81;
+
+        /// Levenberg-Marquardt initial lambda parameter for PnP calculation  
+        double lambda = 0.01;
 
         int num_features = 200;
         int num_features_init = 100;
@@ -156,7 +159,7 @@ public:
         kTriggerDepth
     };
 
-    RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera);
+    RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const StereoDepthCamera& depth_camera);
 
     void set_trigger(Trigger trigger) { trigger_ = trigger; }
     Trigger trigger() const { return trigger_; }
@@ -230,7 +233,7 @@ private:
     const Camera& rgb_camera_;
 
     /// Parameters describing the depth camera
-    const Camera& depth_camera_;
+    const StereoDepthCamera& depth_camera_;
 
     /// Processing trigger
     Trigger trigger_;

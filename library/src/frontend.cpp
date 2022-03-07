@@ -32,7 +32,7 @@
 
 #include "slammer/events.h"
 #include "slammer/flow.h"
-#include "slammer/math.h"
+#include "slammer/pnp.h"
 #include "slammer/backend.h"
 
 
@@ -97,9 +97,17 @@ void MaskNaN(const std::vector<Point3d>& points, std::vector<uchar>& mask) {
     }
 }
 
+inline bool NotNaN(const Point3d& point) {
+    return !isnan(point.sum());
 }
 
-RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera)
+inline bool NotNaN(const std::vector<Point3d>& points) {
+    return NotNaN(std::reduce(begin(points), end(points)));
+}
+
+}
+
+RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const StereoDepthCamera& depth_camera)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera), 
       feature_detector_(parameters.orb_parameters),
       status_(Status::kInitializing), random_engine_(parameters.seed), trigger_(Trigger::kTriggerColor),
@@ -232,23 +240,29 @@ void RgbdFrontend::ProcessFrame() {
             for (const auto& point: current_points) {
                 auto z = DepthForPixel(current_frame_data_, point);
                 current_coords.push_back(rgb_camera_.PixelToCamera(point, z));
-                mask.push_back(z != 0 ? std::numeric_limits<uchar>::max() : 0);
+                mask.push_back(!isnan(z) ? std::numeric_limits<uchar>::max() : 0);
             }    
 
-#if 1
-            num_features = 
-                RobustIcp(current_coords, tracked_feature_coords_, 
-                          random_engine_, relative_motion, mask,
-                          parameters_.max_iterations, parameters_.sample_size, 
-                          parameters_.outlier_threshold);
-#else 
-            MaskNaN(tracked_feature_coords_, mask);
-            MaskNaN(current_coords, mask);
+            //assert(NotNaN(tracked_feature_coords_));
+            //assert(NotNaN(current_coords));
 
-            relative_motion = OptimizeAlignment(current_coords, tracked_feature_coords_, mask,
-                       rgb_camera_, 0.05, parameters_.max_iterations);
-#endif 
+            PerspectiveAndPoint3d::PointPairs point_pairs;
 
+            for (size_t index = 0; index < tracked_feature_coords_.size(); ++index) {
+                point_pairs.emplace_back(depth_camera_.CameraToPixelDisparity(tracked_feature_coords_[index]), 
+                                         depth_camera_.CameraToPixelDisparity(current_coords[index]));
+            }
+
+            PerspectiveAndPoint3d instance(depth_camera_, depth_camera_, point_pairs);
+            SE3d calculated_pose = current_pose_.inverse();
+
+            auto result =
+                instance.Ransac(calculated_pose, mask, tracked_feature_coords_, parameters_.sample_size, parameters_.max_iterations, parameters_.lambda, parameters_.outlier_threshold, random_engine_);
+
+            // TODO: What happens if we could not solve the optimization problem?
+            assert(result.ok());
+
+            relative_motion = calculated_pose.inverse();
             PostPointCloudAlignment(now, relative_motion, tracked_feature_coords_, current_coords, mask);
             
             CompressInto(current_points, mask, tracked_features_);
@@ -298,9 +312,11 @@ size_t RgbdFrontend::DetectKeyframeFeatures() {
     for (const auto& point: key_points_) {
         auto z = DepthForPixel(current_frame_data_, point.coords);
 
-        if (z) {
+        if (!isnan(z)) {
             tracked_features_.push_back(point.coords);
-            tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
+            auto camera_point = rgb_camera_.PixelToCamera(point.coords, z);
+            assert(NotNaN(camera_point));
+            tracked_feature_coords_.push_back(camera_point);
         }
     }    
 
@@ -343,7 +359,7 @@ size_t RgbdFrontend::DetectAdditionalFeatures(size_t num_additonal) {
     for (const auto& point: additional_points) {
         auto z = DepthForPixel(current_frame_data_, point.coords);
 
-        if (z) {
+        if (!isnan(z)) {
             tracked_features_.push_back(point.coords);
             tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
         }
