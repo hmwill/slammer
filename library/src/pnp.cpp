@@ -177,7 +177,7 @@ PerspectiveAndPoint3d::SolveLevenberg(SE3d& pose, std::vector<Point3d>& points, 
 Result<double> 
 PerspectiveAndPoint3d::Ransac(SE3d& pose, std::vector<uchar>& inlier_mask, const std::vector<Point3d>& points, 
                               size_t sample_size, unsigned max_iterations, double lambda, double threshold,
-                            std::default_random_engine& random_engine) {
+                              std::default_random_engine& random_engine) {
     auto indices = InitializeIndices(points.size(), inlier_mask);
 
     unsigned max_additional_inliers = 0;

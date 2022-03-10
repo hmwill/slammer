@@ -113,29 +113,9 @@ RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camer
       status_(Status::kInitializing), random_engine_(parameters.seed), trigger_(Trigger::kTriggerColor),
       distance_since_last_keyframe_(0.0), skip_count_(0) {}
 
-void RgbdFrontend::ClearFeatureVectors() {
-    tracked_features_.clear();
-    tracked_feature_coords_.clear();
-}
-
-void RgbdFrontend::PostKeyframe() {
-    last_keyframe_pose_ = current_pose_;
-    
-    RgbdFrameEvent event;
-
-    last_keyframe_timestamp_ =
-        event.timestamp = std::max(current_frame_data_.time_rgb, current_frame_data_.time_depth);
-    event.frame_data = current_frame_data_;
-    event.pose = current_pose_;
-    event.keypoints = key_points_;
-    event.info.rgb = &rgb_camera_;
-    event.info.depth = &depth_camera_;
-    event.descriptions = std::move(descriptors_);
-
-    keyframes.HandleEvent(event);
-
-    distance_since_last_keyframe_ = 0.0;
-}
+// -----------------------------------------------------------------------------------------------
+// Incoming event handlers
+// -----------------------------------------------------------------------------------------------
 
 void RgbdFrontend::HandleColorEvent(const ColorImageEvent& event) {
     current_frame_data_.time_rgb = event.timestamp;
@@ -163,6 +143,68 @@ void RgbdFrontend::HandleKeyframePoseEvent(const KeyframePoseEvent& event) {
         event.keyframe->pose
     });
 }
+
+// -----------------------------------------------------------------------------------------------
+// Outgoing events
+// -----------------------------------------------------------------------------------------------
+
+void RgbdFrontend::PostKeyframe() {
+    last_keyframe_pose_ = current_pose_;
+    
+    RgbdFrameEvent event;
+
+    last_keyframe_timestamp_ =
+        event.timestamp = std::max(current_frame_data_.time_rgb, current_frame_data_.time_depth);
+    event.frame_data = current_frame_data_;
+    event.pose = current_pose_;
+    event.keypoints = key_points_;
+    event.info.rgb = &rgb_camera_;
+    event.info.depth = &depth_camera_;
+    event.descriptions = std::move(descriptors_);
+
+    keyframes.HandleEvent(event);
+
+    distance_since_last_keyframe_ = 0.0;
+}
+
+void RgbdFrontend::PostProcessedFrame(Timestamp timestamp, Status old_state, Status new_state, const SE3d& pose,
+                                      size_t num_tracked_features, bool is_keyframe) {
+    if (processed_frames.has_listeners()) {
+        ProcessedFrameEvent event;
+
+        event.timestamp = timestamp;
+        event.old_state = old_state;
+        event.new_state = new_state;
+        event.pose = pose;
+        event.num_tracked_features = num_tracked_features;
+        event.is_keyframe = is_keyframe;
+
+        processed_frames.HandleEvent(event);
+    }
+}
+
+void 
+RgbdFrontend::PostPointCloudAlignment(Timestamp timestamp, const SE3d& relative_motion,
+                                      const std::vector<Point3d>& reference, 
+                                      const std::vector<Point3d>& transformed,
+                                      const std::vector<uchar>& inliers) {
+    if (point_cloud_alignments.has_listeners()) {
+        PointCloudAlignmentEvent event;
+
+        event.timestamp = timestamp;
+        event.relative_motion = relative_motion;
+        event.reference = reference;
+        event.transformed = transformed;
+        std::transform(inliers.begin(), inliers.end(), std::back_inserter(event.inliers),
+                       [](uchar ch) { return ch != 0; });
+
+        point_cloud_alignments.HandleEvent(event);
+    }
+}
+
+// -----------------------------------------------------------------------------------------------
+// Main tracking algorithm and supporting functions
+// -----------------------------------------------------------------------------------------------
 
 void RgbdFrontend::ProcessFrame() {
     // Haven't received enough information yet; skip processing
@@ -299,6 +341,11 @@ void RgbdFrontend::ProcessFrame() {
     PostProcessedFrame(now, old_status, status_, current_pose_, tracked_features_.size(), is_keyframe);
 }
 
+void RgbdFrontend::ClearFeatureVectors() {
+    tracked_features_.clear();
+    tracked_feature_coords_.clear();
+}
+
 size_t RgbdFrontend::DetectKeyframeFeatures() {
     using std::begin, std::end;
 
@@ -419,40 +466,7 @@ void RgbdFrontend::PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vec
 }
 
 
-void RgbdFrontend::PostProcessedFrame(Timestamp timestamp, Status old_state, Status new_state, const SE3d& pose,
-                                      size_t num_tracked_features, bool is_keyframe) {
-    if (processed_frames.has_listeners()) {
-        ProcessedFrameEvent event;
 
-        event.timestamp = timestamp;
-        event.old_state = old_state;
-        event.new_state = new_state;
-        event.pose = pose;
-        event.num_tracked_features = num_tracked_features;
-        event.is_keyframe = is_keyframe;
-
-        processed_frames.HandleEvent(event);
-    }
-}
-
-void 
-RgbdFrontend::PostPointCloudAlignment(Timestamp timestamp, const SE3d& relative_motion,
-                                      const std::vector<Point3d>& reference, 
-                                      const std::vector<Point3d>& transformed,
-                                      const std::vector<uchar>& inliers) {
-    if (point_cloud_alignments.has_listeners()) {
-        PointCloudAlignmentEvent event;
-
-        event.timestamp = timestamp;
-        event.relative_motion = relative_motion;
-        event.reference = reference;
-        event.transformed = transformed;
-        std::transform(inliers.begin(), inliers.end(), std::back_inserter(event.inliers),
-                       [](uchar ch) { return ch != 0; });
-
-        point_cloud_alignments.HandleEvent(event);
-    }
-}
 
 /*
 

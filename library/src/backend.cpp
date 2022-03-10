@@ -32,6 +32,7 @@
 
 #include "slammer/map.h"
 #include "slammer/math.h"
+#include "slammer/pnp.h"
 
 #include "g2o/types/slam3d/types_slam3d.h"
 #include "g2o/core/sparse_optimizer.h"
@@ -151,6 +152,7 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
             SE3d relative_motion;
             std::vector<uchar> mask;
 
+            // TODO: Replace by PerspectiveAndPoint3d
             size_t num_inliers = 
                 RobustIcp(candidate_points, keyframe_points,
                             random_engine_, relative_motion, mask,
@@ -248,6 +250,7 @@ bool Backend::DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePoin
         SE3d relative_motion;
         std::vector<uchar> mask;
 
+        // TODO: Replace by PerspectiveAndPoint3d
         size_t num_inliers = 
             RobustIcp(candidate_points, keyframe_points,
                         random_engine_, relative_motion, mask,

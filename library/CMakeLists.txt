@@ -10,6 +10,7 @@ add_library(slammer_lib
   src/optimizer.cpp
   src/orb.cpp
   src/pnp.cpp
+  src/pose_graph_optimizer.cpp
   src/utility.cpp
   src/loris/driver.cpp src/loris/opencv_utils.cpp
 )
