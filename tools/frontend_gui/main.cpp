@@ -107,7 +107,8 @@ void RunPipeline(Timediff duration) {
     assert(depth_camera_pose.ok());
 
     Camera rgb_camera = CreateCamera(sensor_info.d400_color_optical_frame, rgb_camera_pose.value());
-    Camera depth_camera = CreateCamera(sensor_info.d400_depth_optical_frame, depth_camera_pose.value());
+    //Camera depth_camera = CreateCamera(sensor_info.d400_depth_optical_frame, depth_camera_pose.value());
+    StereoDepthCamera depth_camera = CreateAlignedStereoDepthCamera(sensor_info.d400_depth_optical_frame, 0.05, SE3d());
     RgbdFrontend::Parameters frontend_parameters;
 
     // process only 1 frane/sec

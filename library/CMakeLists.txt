@@ -22,7 +22,7 @@ target_include_directories(slammer_lib PUBLIC
 )
 
 target_link_libraries(slammer_lib
-  SuiteSparse::cholmod
+  SuiteSparse::cholmod fmt::fmt png
 )
 
 add_executable(test_slammer_lib 
