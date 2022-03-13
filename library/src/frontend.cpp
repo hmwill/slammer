@@ -295,6 +295,12 @@ void RgbdFrontend::ProcessFrame() {
                                          depth_camera_.CameraToPixelDisparity(current_coords[index]));
             }
 
+            // std::cout << "Differences" << std::endl;
+            // for (const auto& pair: point_pairs) {
+            //     std::cout << pair.second - pair.first << std::endl;
+            // }
+            // std::cout << std::endl;
+
             PerspectiveAndPoint3d instance(depth_camera_, depth_camera_, point_pairs);
             SE3d calculated_pose = current_pose_.inverse();
 
@@ -456,11 +462,11 @@ void RgbdFrontend::PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vec
 
     auto camera_to_robot = rgb_camera_.camera_to_robot();
     //auto transform = camera_to_robot.inverse() * predicted_pose.inverse() * previous_pose_ * camera_to_robot;
+    //auto transform = predicted_pose.inverse() * previous_pose_;
     auto transform = predicted_pose * previous_pose_.inverse();
 
-    for (const auto& point: tracked_features_) {
-        auto z = DepthForPixel(current_frame_data_, point);
-        auto transformed_point = transform * rgb_camera_.PixelToCamera(point, z);
+    for (const auto& point: tracked_feature_coords_) {
+        auto transformed_point = transform * point;
         points.push_back(rgb_camera_.CameraToPixel(transformed_point));
     }
 }

@@ -62,13 +62,13 @@ TEST(FrontendTest, RunFrontend) {
 
     Camera rgb_camera = CreateCamera(sensor_info.d400_color_optical_frame, rgb_camera_pose.value());
     //Camera depth_camera = CreateCamera(sensor_info.d400_depth_optical_frame, depth_camera_pose.value());
-    StereoDepthCamera depth_camera = CreateAlignedStereoDepthCamera(sensor_info.d400_depth_optical_frame, 0.05, SE3d());
+    StereoDepthCamera depth_camera = CreateAlignedStereoDepthCamera(sensor_info.d400_depth_optical_frame, 0.05, depth_camera_pose.value());
     RgbdFrontend::Parameters frontend_parameters;
 
-    // process only 1 frane/sec
-    frontend_parameters.skip_count = 0;
+    // process only subset of frame/sec
+    frontend_parameters.skip_count = 29;
     frontend_parameters.max_keyframe_interval = Timediff(1.0);
-    frontend_parameters.outlier_threshold = 1.0;
+    frontend_parameters.outlier_threshold = 7.81;
 
     RgbdFrontend frontend(frontend_parameters, rgb_camera, depth_camera);
 
