@@ -36,6 +36,7 @@ add_executable(test_slammer_lib
   tests/keyframe_index_test.cpp
   tests/optimizer_test.cpp
   tests/orb_test.cpp
+  tests/tracking_test.cpp
   tests/utility_test.cpp
   tests/loris/driver_test.cpp tests/loris/opencv_utils_test.cpp
 )
