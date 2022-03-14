@@ -46,6 +46,59 @@ using namespace slammer::loris;
 
 namespace {
 
+using namespace boost::gil;
+
+void LogFeatures(ImageLogger& logger, const std::string& name, const gray8c_view_t& image,
+                 const std::vector<Point2f>& points, const std::vector<Point2f>* secondary = nullptr) {
+    rgb8_image_t display_features(image.dimensions());
+    auto output = view(display_features);
+
+    copy_pixels(color_converted_view<rgb8_pixel_t>(image), output);
+
+    const rgb8_pixel_t red(255, 0, 0);
+    const rgb8_pixel_t blue(0, 0, 255);
+
+    if (secondary) {
+        for (auto point: *secondary) {
+            output(point.x, point.y) = blue;
+            output(point.x - 3, point.y) = blue;
+            output(point.x - 2, point.y) = blue;
+            output(point.x - 1, point.y) = blue;
+            output(point.x + 1, point.y) = blue;
+            output(point.x + 2, point.y) = blue;
+            output(point.x + 3, point.y) = blue;
+            output(point.x, point.y - 3) = blue;
+            output(point.x, point.y - 2) = blue;
+            output(point.x, point.y - 1) = blue;
+            output(point.x, point.y + 1) = blue;
+            output(point.x, point.y + 2) = blue;
+            output(point.x, point.y + 3) = blue;
+        }
+    }
+
+    for (auto point: points) {
+        if (isnan(point.x) || isnan(point.y)) {
+            continue;
+        }
+        
+        output(point.x, point.y) = red;
+        output(point.x - 3, point.y) = red;
+        output(point.x - 2, point.y) = red;
+        output(point.x - 1, point.y) = red;
+        output(point.x + 1, point.y) = red;
+        output(point.x + 2, point.y) = red;
+        output(point.x + 3, point.y) = red;
+        output(point.x, point.y - 3) = red;
+        output(point.x, point.y - 2) = red;
+        output(point.x, point.y - 1) = red;
+        output(point.x, point.y + 1) = red;
+        output(point.x, point.y + 2) = red;
+        output(point.x, point.y + 3) = red;
+    }
+
+    logger.LogImage(const_view(display_features), name);
+}
+
 // Depth scale used: https://lifelong-robotic-vision.github.io/dataset/scene
 static constexpr double kDepthScale = 0.001;
 
@@ -110,15 +163,22 @@ struct TrackingLostEvent: public Event {
 struct TrackingEvent: public Event {
     SE3d pose;
     size_t num_features;
+    ColorImage image;
+    std::vector<Point2f> features;
+    std::vector<Point2f> reference;
 };
 
 struct InitializedEvent: public Event {
     SE3d pose;
     size_t num_features;
+    ColorImage image;
+    std::vector<Point2f> features;
 };
 
 class TrackingListener {
 public:
+    TrackingListener(const std::string& path)
+      : image_logger_(path) {}
 
     void HandleGroundtruthEvent(const loris::GroundtruthEvent& event) {
         current_groundtruth_pose = SE3d(event.orientation, Point3d::Zero()) * 
@@ -131,10 +191,15 @@ public:
         refernce_timestamp = event.timestamp;
         reference_pose = event.pose;
         reference_groundtruth_pose = current_groundtruth_pose;
+
+        auto gray = RgbToGrayscale(const_view(*event.image));
+        LogFeatures(image_logger_, fmt::format("initialized-{}.", event.timestamp.time_since_epoch().count()), 
+                    const_view(gray), event.features);
     }
 
     void HandleTrackingEvent(const TrackingEvent& event) {
         ++num_frames;
+        is_tracking = true;
         current_timestamp = event.timestamp;
         current_pose = event.pose;
 
@@ -149,18 +214,25 @@ public:
 
         auto factor = estimated_distance / groundtruth_distance;
 
-        EXPECT_GE(factor, 0.9);
-        EXPECT_LE(factor, 1.1);
+        EXPECT_GE(factor, 0.75);
+        EXPECT_LE(factor, 1.25);
 
-        EXPECT_EQ(estimated_distance, groundtruth_distance);
+        // EXPECT_EQ(estimated_distance, groundtruth_distance);
 
+        auto gray = RgbToGrayscale(const_view(*event.image));
+        LogFeatures(image_logger_, fmt::format("tracking-{}.", event.timestamp.time_since_epoch().count()), 
+                    const_view(gray), event.features, &event.reference);
     }
 
     void HandleTrackingLostEvent(const TrackingLostEvent& event) {
         current_timestamp = event.timestamp;
+        is_tracking = false;
     }
 
+    FileImageLogger image_logger_;
+
     size_t num_frames = 0;
+    bool is_tracking = false;
 
     SE3d current_groundtruth_pose;
     SE3d reference_groundtruth_pose;
@@ -269,11 +341,10 @@ public:
     ///
     /// \param event the event data structure procviding access to the image data
     void HandleColorEvent(const ColorImageEvent& event) {
-        current_state_.timestamp = event.timestamp;
         current_state_.color_image = event.image;
 
         if (parameters_.trigger == Trigger::kTriggerColor) {
-            ProcessCurrentImages();
+            ProcessCurrentImages(event.timestamp);
         }
     }
 
@@ -281,11 +352,10 @@ public:
     ///
     /// \param event the event data structure procviding access to the image data
     void HandleDepthEvent(const DepthImageEvent& event) {
-        current_state_.timestamp = event.timestamp;
         current_state_.depth_image = event.image;
 
         if (parameters_.trigger == Trigger::kTriggerDepth) {
-            ProcessCurrentImages();
+            ProcessCurrentImages(event.timestamp);
         }
     }
 
@@ -294,7 +364,7 @@ public:
     EventListenerList<TrackingLostEvent> tracking_lost;
 
 protected:
-    void ProcessCurrentImages() {
+    void ProcessCurrentImages(Timestamp timestamp) {
         // TODO: Later, we could actually learn if color or depth should be used as trigger,
         // or possibly use some form of interpolation
 
@@ -313,15 +383,15 @@ protected:
         // Dispatch to correct state function
         switch (state_) {
         case TrackingState::kInitializing:
-            DoInitialize();
+            DoInitialize(timestamp);
             break;
 
         case TrackingState::kTracking:
-            DoTracking();
+            DoTracking(timestamp);
             break;
 
         case TrackingState::kTrackingLost:
-            DoRecover();
+            DoRecover(timestamp);
             break;
         }
     }
@@ -330,13 +400,15 @@ protected:
         InitializedEvent event {
             reference_state_.timestamp,
             reference_state_.pose,
-            reference_state_.pixel_coords.size()
+            reference_state_.pixel_coords.size(),
+            reference_state_.color_image,
+            reference_state_.pixel_coords
         };
 
         initialization.HandleEvent(event);
     }
 
-    void DoInitialize() {
+    void DoInitialize(Timestamp timestamp) {
         std::vector<orb::KeyPoint> key_points;
 
         detector_.ComputeFeatures(const_view(*current_state_.color_image), 
@@ -361,10 +433,10 @@ protected:
         }    
 
         // keep track of time
-        reference_state_.timestamp = current_state_.timestamp;
+        reference_state_.timestamp = current_state_.timestamp = timestamp;
 
-        // initialize the refernce pose to origin; this may need to changed later
-        reference_state_.pose = SE3d();
+        // initialize the current and reference pose to origin; this may need to changed later
+        current_state_.pose = reference_state_.pose = SE3d();
 
         // initialize the "velocity" to zero
         relative_motion_twist_.setZero();
@@ -379,7 +451,10 @@ protected:
         TrackingEvent event {
             current_state_.timestamp,
             current_state_.pose,
-            reference_state_.pixel_coords.size()
+            reference_state_.pixel_coords.size(),
+            current_state_.color_image,
+            current_state_.pixel_coords,
+            reference_state_.pixel_coords
         };
 
         tracking.HandleEvent(event);
@@ -393,16 +468,25 @@ protected:
         tracking_lost.HandleEvent(event);
     }
 
-    void DoTracking() {
+    void DoTracking(Timestamp timestamp) {
         std::vector<float> error;
 
         // TODO: Refactor this such that the same conversion can be used for feature detection
         auto source = RgbToGrayscale(const_view(*reference_state_.color_image));
         auto target = RgbToGrayscale(const_view(*current_state_.color_image));
 
+        auto estimated_motion =
+            SE3d::exp(relative_motion_twist_ * (timestamp - current_state_.timestamp).count());
+        auto estimated_transform = (estimated_motion * current_state_.pose).inverse();
+
+        current_state_.pixel_coords.clear();
+        std::transform(reference_state_.camera_coords.begin(), reference_state_.camera_coords.end(),
+            std::back_insert_iterator(current_state_.pixel_coords),
+            [&](const auto& point) { return rgb_camera_.CameraToPixel(estimated_transform * point); });
+
         // TODO: initialize the target coordinates using the motion estimate captured in
         // relative_motion_twist_
-        current_state_.pixel_coords = reference_state_.pixel_coords;
+        // current_state_.pixel_coords = reference_state_.pixel_coords;
 
         ComputeFlow(const_view(source), const_view(target),
                     reference_state_.pixel_coords, current_state_.pixel_coords, error,
@@ -411,14 +495,26 @@ protected:
         float squared_error = parameters_.flow_threshold * parameters_.flow_threshold;
 
         // this mask captures the points we have been able to track well
+        // that is, they are still within the valid range of coordinates, and the error is controlled
         std::vector<uchar> mask;
-        std::transform(error.begin(), error.end(), std::back_inserter(mask),
-                       [=](float err) { return err <= squared_error; });
+        for (size_t index = 0; index < current_state_.pixel_coords.size(); ++index) {
+            const auto& point = current_state_.pixel_coords[index];
+            if (!isnan(point.x) && !isnan(point.y) && error[index] <= squared_error) {
+                mask.push_back(std::numeric_limits<uchar>::max());
+            } else {
+                mask.push_back(0);
+            }
+        }
 
         // create 3d coordinates for tracked features
         current_state_.camera_coords.clear();
 
         for (size_t index = 0; index < current_state_.pixel_coords.size(); ++index) {
+            if (!mask[index]) {
+                current_state_.camera_coords.push_back(Point3d());
+                continue;
+            }
+
             const auto& point = current_state_.pixel_coords[index];
             auto z = DepthForPixel(current_state_.depth_image, point);
 
@@ -451,8 +547,13 @@ protected:
             return;
         }
 
-        current_state_.pose = calculated_pose.inverse() * reference_state_.pose;
+        auto new_pose = calculated_pose.inverse() * reference_state_.pose;
+        relative_motion_twist_ = 
+            -(current_state_.pose * new_pose.inverse()).log() * (1.0/(timestamp - current_state_.timestamp).count());
+        current_state_.pose = new_pose;
+        current_state_.timestamp = timestamp;
 
+        Compress(current_state_.pixel_coords, mask);
         Compress(reference_state_.pixel_coords, mask);
         Compress(reference_state_.camera_coords, mask);
 
@@ -465,7 +566,7 @@ protected:
         DidTrack();
     }
 
-    void DoRecover() {
+    void DoRecover(Timestamp timestamp) {
 
     }
 
@@ -501,7 +602,6 @@ private:
 // To consider: instead of tracking via optical flow, we could equally
 // compare the results to key point detection and matchng for each frame
 TEST(TrackingTest, TestAbsolute) {
-
     using namespace std::placeholders;
 
     std::string kDataSetPath("data/cafe1-1");
@@ -529,23 +629,17 @@ TEST(TrackingTest, TestAbsolute) {
     driver.color.AddHandler(std::bind(&AbsoluteTracker::HandleColorEvent, &tracker, _1));
     driver.aligned_depth.AddHandler(std::bind(&AbsoluteTracker::HandleDepthEvent, &tracker, _1));
 
-    TrackingListener listener;
+    TrackingListener listener("image_logs/tracking_test/test_absolute");
     driver.groundtruth.AddHandler(std::bind(&TrackingListener::HandleGroundtruthEvent, &listener, _1));
     tracker.initialization.AddHandler(std::bind(&TrackingListener::HandleInitializedEvent, &listener, _1));
     tracker.tracking.AddHandler(std::bind(&TrackingListener::HandleTrackingEvent, &listener, _1));
     tracker.tracking_lost.AddHandler(std::bind(&TrackingListener::HandleTrackingLostEvent, &listener, _1));
 
-    // Determine features and 3d coordinates in first frame
-
-
-    // for each subsequent frame: 
-    //  Use optical flow to determine updated locations of feature point
-    //  Solve PnP problem to estimate a pose relative to the first frame 
-
-    // run for 2 secs of simulated events
-    auto result = driver.Run(slammer::Timediff(60.0));
+    // run for 5 secs of simulated events
+    auto result = driver.Run(slammer::Timediff(5.0));
     EXPECT_TRUE(result.ok());
-
+    EXPECT_TRUE(listener.is_tracking);
+    EXPECT_EQ(listener.num_frames, 149);
 }
 
 namespace {
