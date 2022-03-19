@@ -14,7 +14,7 @@
         "default-features": true,
         "features": [ "vtk" ]
       },
-      "pangolin",
+      "sciplot",
       "suitesparse",
       "sophus"
     ]

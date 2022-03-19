@@ -22,8 +22,8 @@ include_directories(${Eigen3_INCLUDE_DIRS})
 find_package(Sophus REQUIRED)
 include_directories(${Sophus_INCLUDE_DIRS})
 
-find_package(Pangolin CONFIG REQUIRED)
-include_directories(${Pangolin_INCLUDE_DIRS})
+find_package(sciplot REQUIRED)
+include_directories(${sciplot_INCLUDE_DIRS})
 
 find_package(OpenCV 4.5 REQUIRED)
 include_directories(${OpenCV_INCLUDE_DIRS})

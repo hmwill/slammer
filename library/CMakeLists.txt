@@ -50,6 +50,7 @@ target_link_libraries(test_slammer_lib
   Eigen3::Eigen
   png
   fmt::fmt
+  sciplot::sciplot
 )
 
 add_test(NAME SlammerLibTests COMMAND test_slammer_lib WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

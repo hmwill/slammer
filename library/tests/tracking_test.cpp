@@ -31,6 +31,7 @@
 #include <stdexcept>
 
 #include <gtest/gtest.h>
+#include <sciplot/sciplot.hpp>
 
 #include "slammer/slammer.h"
 #include "slammer/flow.h"
@@ -182,7 +183,8 @@ public:
 
     void HandleGroundtruthEvent(const loris::GroundtruthEvent& event) {
         current_groundtruth_pose = SE3d(event.orientation, Point3d::Zero()) * 
-            SE3d(SE3d::QuaternionType::Identity(), event.position);;
+            SE3d(SE3d::QuaternionType::Identity(), event.position);
+        groundtruth_path.push_back(event.position);
     }
 
     void HandleInitializedEvent(const InitializedEvent& event) {
@@ -191,6 +193,7 @@ public:
         refernce_timestamp = event.timestamp;
         reference_pose = event.pose;
         reference_groundtruth_pose = current_groundtruth_pose;
+        estimated_path.push_back(event.pose);
 
         auto gray = RgbToGrayscale(const_view(*event.image));
         LogFeatures(image_logger_, fmt::format("initialized-{}.", event.timestamp.time_since_epoch().count()), 
@@ -202,6 +205,7 @@ public:
         is_tracking = true;
         current_timestamp = event.timestamp;
         current_pose = event.pose;
+        estimated_path.push_back(event.pose);
 
         auto groundtruth_translation = (current_groundtruth_pose * reference_groundtruth_pose.inverse()).translation();
         auto groundtruth_distance = groundtruth_translation.norm();
@@ -240,6 +244,8 @@ public:
     SE3d current_pose;
     Timestamp refernce_timestamp;
     Timestamp current_timestamp;
+    std::vector<Point3d> groundtruth_path;
+    std::vector<SE3d> estimated_path;
 };
 
 struct TrackerState {
@@ -590,6 +596,43 @@ private:
     std::default_random_engine random_engine_;
 };
 
+void PlotPath(const std::string& filename, const std::vector<Point3d>& locations, bool use_z = true) {
+    using namespace sciplot;
+
+    Plot plot;
+
+    std::vector<double> x, y, z;
+
+    for (const auto& location: locations) {
+        x.push_back(location.x());
+        y.push_back(location.y());
+        z.push_back(location.z());
+    }
+
+    plot.drawCurve(x, use_z ? z : y);
+
+    plot.save(filename);
+}
+
+void PlotPath(const std::string& filename, const std::vector<SE3d>& poses, bool use_z = true) {
+    using namespace sciplot;
+
+    Plot plot;
+
+    std::vector<double> x, y, z;
+
+    for (const auto& pose: poses) {
+        const auto& translation = pose.translation();
+        x.push_back(translation.x());
+        y.push_back(translation.y());
+        z.push_back(translation.z());
+    }
+
+    plot.drawCurve(x, use_z ? z : y);
+
+    plot.save(filename);
+}
+
 } // namespace
 
 // Test tracking relative to the first frame
@@ -640,25 +683,29 @@ TEST(TrackingTest, TestAbsolute) {
     EXPECT_TRUE(result.ok());
     EXPECT_TRUE(listener.is_tracking);
     EXPECT_EQ(listener.num_frames, 149);
+
+    PlotPath("image_logs/tracking_test/test_absolute/groundtruth.png", listener.groundtruth_path, false);
+    PlotPath("image_logs/tracking_test/test_absolute/estimated.png", listener.estimated_path, true);
 }
 
-namespace {
+/*
+- Render the sequence of poses; create such graphs both for the baseline and the estimated poses
+- Add functionality to create new reference frames while keeping track of the current pose
+- What criteria would trigger the creation of a new reference frame?
+    - Low number of features tracked 
+    - Degree to which the camera has swept the space
+    - Are all features tracked confined to a small section of the image?
+    - Number of frames/seconds since last reference frame was taken
+    - Are there specific attributed that would make one frame preferable of others? (blurriness)
+- How should we handle situations where tracking is lost; that is, how to restart and continue
+- Should we handle situations where images cannot be captured? (e.g. lights off)
+- Add feature descriptor calculation to reference frame processing
+- Add posting of reference frames
 
-} // namespace
-
-// Test tracking by determining incremental pose changes between adjacent frames
-//
-// Debugging information to generate along the way:
-//  - Image logs showing how features are mapped
-//  - Pose relative to first frame as calculated
-//  - Pose relative to first frame as provided by ground truth
-TEST(TrackingTest, TestRelative) {
-    // Determine features and 3d coordinates in first frame
-    // Store this information as previous state
+- Refactor AbsoluteTracker into new FrontEnd class
 
 
-    // for each subsequent frame: 
-    //  Use optical flow to determine updated locations of feature points
-    //  Solve PnP problem to estimate a pose relative to the previous frame
 
-}
+
+
+*/
