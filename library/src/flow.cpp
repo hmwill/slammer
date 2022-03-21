@@ -190,7 +190,8 @@ private:
 void 
 slammer::ComputeFlow(const gray8c_view_t& source, const gray8c_view_t& target,
                      const std::vector<Point2f>& source_points, std::vector<Point2f>& target_points,
-                     std::vector<float>& error, unsigned num_levels, unsigned omega, float threshold) {
+                     std::vector<float>& error, unsigned num_levels, unsigned omega, float threshold,
+                     unsigned max_iterations) {
     // calculate image pyramids
     std::vector<gray8_image_t> source_pyramid, target_pyramid;
     AppendPyramidLevels(source, 0.5f, num_levels, source_pyramid);
@@ -261,7 +262,7 @@ slammer::ComputeFlow(const gray8c_view_t& source, const gray8c_view_t& target,
             Eigen::LLT<decltype(G)> decomposition(G);
 
             // iterate until convergence
-            unsigned remaining_iterations = 10;
+            unsigned remaining_iterations = max_iterations;
 
             do {
                 Vec2 omega_x(omega, 0), omega_y(0, omega);

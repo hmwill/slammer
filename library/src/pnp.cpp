@@ -77,12 +77,22 @@ std::vector<size_t> InitializeIndices(size_t num_points, const std::vector<uchar
     return indices;
 }
 
+inline SE3d Exp(const SE3d::Tangent& tangent) {
+    //static std::ofstream tangent_log("tangents.log");
+
+    assert(!isnan(tangent[0]) && !isnan(tangent[1]) && !isnan(tangent[2]));
+    assert(!isnan(tangent[3]) && !isnan(tangent[4]) && !isnan(tangent[5]));
+
+    //tangent_log << "Tangent = " << tangent.transpose() << std::endl;
+    return SE3d::exp(tangent);
+}
+
 } // namespace
 
 Eigen::SparseMatrix<double> 
 PerspectiveAndPoint3d::CalculateJacobian(const Eigen::VectorXd& value) const {
     SE3d::Tangent tangent(value(Eigen::seqN(0, 6)));
-    SE3d second_pose = SE3d::exp(tangent);
+    SE3d second_pose = Exp(tangent);
 
     Eigen::Matrix<double, 3, 3> jacobian_second_coords = second_pose.so3().matrix();
 
@@ -126,7 +136,7 @@ PerspectiveAndPoint3d::CalculateJacobian(const Eigen::VectorXd& value) const {
 Eigen::VectorXd 
 PerspectiveAndPoint3d::CalculateResidual(const Eigen::VectorXd& value) const {
     SE3d::Tangent tangent(value(Eigen::seqN(0, 6)));
-    SE3d second_pose = SE3d::exp(tangent);
+    SE3d second_pose = Exp(tangent);
 
     Eigen::VectorXd residual(point_pairs_.size() * 6);
 
@@ -164,7 +174,8 @@ PerspectiveAndPoint3d::SolveLevenberg(SE3d& pose, std::vector<Point3d>& points, 
 
     if (result.ok()) {
         // extract the optimization result
-        pose = SE3d::exp(variables(Eigen::seqN(0, 6)));
+        SE3d::Tangent tangent = variables(Eigen::seqN(0, 6));
+        pose = Exp(tangent);
 
         for (size_t index = 0; index < points.size(); ++index) {
             points[index] = variables(Eigen::seqN(index * 3 + 6, 3));
@@ -256,8 +267,7 @@ PerspectiveAndPoint3d::Ransac(SE3d& pose, std::vector<uchar>& inlier_mask, const
         // just use all points that have not been masked out
         auto all_points = Subset(points, indices, indices.size());
         auto all_point_pairs = Subset(point_pairs_, indices, indices.size());
-        PerspectiveAndPoint3d instance(first_, second_, point_pairs_);
-        std::vector<Point3d> temp_points(points);
-        return instance.SolveLevenberg(pose, temp_points, max_iterations, lambda);
+        PerspectiveAndPoint3d instance(first_, second_, all_point_pairs);
+        return instance.SolveLevenberg(pose, all_points, max_iterations, lambda);
     }
 }

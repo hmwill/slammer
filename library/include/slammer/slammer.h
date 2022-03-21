@@ -70,7 +70,7 @@ namespace slammer {
 // Common types related to time and space
 
 /// Representation of time differences
-using Timediff = std::chrono::duration<double>;
+using Timediff = std::chrono::duration<double>; 
 
 /// Representation of absolute time (in seconds, relative to standard OS epoch)
 using Timestamp = std::chrono::time_point<std::chrono::system_clock, Timediff>;

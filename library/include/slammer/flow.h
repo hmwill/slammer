@@ -55,9 +55,11 @@ namespace slammer {
 /// \param num_levels               number of levels to generate for the imge pyramid
 /// \param omega                    half-size of window width (window is [-omega .. omega])
 /// \param threshold                convergence threshold
+/// \param max_iterations           number of iterations towards convergence
 void ComputeFlow(const boost::gil::gray8c_view_t& source, const boost::gil::gray8c_view_t& target,
                  const std::vector<Point2f>& source_points, std::vector<Point2f>& target_points,
-                 std::vector<float>& error, unsigned num_levels = 4, unsigned omega = 3, float threshold = 0.5f);
+                 std::vector<float>& error, unsigned num_levels = 4, unsigned omega = 3, float threshold = 0.5f,
+                 unsigned max_iterations = 10);
 
 } // namespace slammer
 
