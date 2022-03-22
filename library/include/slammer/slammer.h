@@ -90,6 +90,9 @@ using Matrix3d = Eigen::Matrix3d;
 /// Mathematical affine transformation type for SE(3)
 using SE3d = Sophus::SE3d;
 
+/// 3-d coordinates used to address locations in rgbd images (x, y, disparity)
+using Point3f = Eigen::Vector3f;;
+
 /// 3-d point coordinate representation
 using Point3d = SE3d::Point;
 

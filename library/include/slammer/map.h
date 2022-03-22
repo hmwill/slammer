@@ -45,7 +45,7 @@ namespace slammer {
 class Camera;
 
 // from frontend.h
-struct RgbdFrameEvent;
+struct KeyframeEvent;
 
 // in this file
 struct Feature;
@@ -91,10 +91,10 @@ struct Keyframe: std::enable_shared_from_this<Keyframe> {
 
 struct Feature: std::enable_shared_from_this<Feature> {
     // keypoint specification
-    orb::KeyPoint keypoint;
+    Point2f keypoint;
 
-    // depth value as measured via depth sensor
-    float depth;
+    // 3D coordinates as estimated from camera reading
+    Point3d coords;
 
     // the keyframe where this observation had been seen
     std::weak_ptr<Keyframe> keyframe;
@@ -142,7 +142,7 @@ public:
     Map& operator=(const Map&) = delete;
 
     /// Create a new keyframe entry based on the event data provided by the frontend
-    KeyframePointer CreateKeyframe(const RgbdFrameEvent& event);
+    KeyframePointer CreateKeyframe(const KeyframeEvent& event);
 
     /// Locate a keyframe based on a timestamp
     KeyframePointer GetKeyframe(Timestamp timestamp) const;

@@ -43,128 +43,173 @@
 
 namespace slammer {
 
-/// Representation of the camera data that is processed by the RGBD frontend. It comprises a color and a depth
-/// image, each with an associated timestamp.
-struct RgbdFrameData {
-    ColorImage rgb;
-    DepthImage depth;
+struct TrackingLostEvent: public Event {
 
-    Timestamp time_rgb;
-    Timestamp time_depth;
 };
 
-struct RgbdCameraInfo {
-    const Camera * rgb;
-    const Camera * depth;
+struct TrackingEvent: public Event {
+    SE3d pose;
+    size_t num_features;
+    ColorImage image;
+    std::vector<Point2f> features;
+    std::vector<Point2f> reference;
 };
 
-/// Representation of a frame that the frontend creates for backend processing
-struct RgbdFrameEvent: public Event {
+struct InitializedEvent: public Event {
+    SE3d pose;
+    size_t num_features;
+    ColorImage image;
+    std::vector<Point2f> features;
+};
+
+/// Representation of a keyframe that the tracking frontend creates for backend processing
+struct KeyframeEvent: public Event {
     // estimated pose for this frame
     Sophus::SE3d pose;
 
     // Locations of feature points within the image (relative to left RGB)
-    std::vector<orb::KeyPoint> keypoints;
+    std::vector<Point2f> keypoints;
+
+    // Estimated 3d positions of features in camera coordinates
+    std::vector<Point3d> keypoint_coords;
 
     // Descriptors associated with the feature points
     Descriptors descriptions;
 
-    // Frame data
-    RgbdFrameData frame_data;
+    // Color frame data
+    ColorImage color;
 
-    // Camera info
-    RgbdCameraInfo info;
+    // Depth frame data
+    DepthImage depth;
+
+    // Color camera info
+    const Camera& rgb_camera;
+
+    // Depth camera info
+    const StereoDepthCamera& depth_camera;
 };
 
-// this is defined by the backend
-struct KeyframePoseEvent;
+struct TrackerState {
+    // the time represented in this state
+    Timestamp timestamp;
 
-// forward declaration
-struct ProcessedFrameEvent;
-struct PointCloudAlignmentEvent;
+    // the pose associated with this state
+    SE3d pose;
 
-/// Tracking frontend using RGBD camera images
-///
-/// Color and depth images are not expected to be synchronized. Instead, the `trigger` property
-/// can be used to determine if receiving the color or receiving the depth image will trigger
-/// processing a frame.
-class RgbdFrontend {
+    // the color image associated with this state
+    ColorImage color_image;
+
+    // the depth image associated with this state
+    DepthImage depth_image;
+
+    // features as tracked in the color/depth image
+    std::vector<Point2f> pixel_coords;
+
+    // features as tracked in 3d camera space
+    std::vector<Point3d> camera_coords; 
+};
+
+/// determine whether color or depth image trigger processing of the next frame
+enum class Trigger: bool {
+    /// the color image will trigger processing
+    kTriggerColor,
+
+    /// the depth image will trigger processing
+    kTriggerDepth
+};
+
+/// The state of the tracker
+enum TrackingState {
+    /// We are not tracking yet
+    kInitializing,
+
+    /// We have features that we attempt to track frame to frame
+    kTracking,
+
+    /// We are still tracking, but would like to acquire a new reference frame
+    kTrackingBad,
+
+    /// We have been unable to track features any further
+    kTrackingLost
+};
+
+/// Parameters to tune optical flow calculation for feature tracking
+struct FlowParameters {
+    // max iterations for optical flow calculation
+    int max_iterations = 10;
+
+    // error threshold for optical flow calculation
+    double threshold = 0.5;
+
+    // the half-window size around each feature to use for optical flow calculation
+    int omega = 3;
+
+    // the number of mimap levels to generate for optical flow calculation
+    int pyramid_levels = 4;
+};
+
+/// Parameters for perspective and points calculation
+struct PnpParameters {
+    // RANSAC iteration limit
+    size_t max_iterations = 30;
+    
+    // RANSAC sample size
+    size_t sample_size = 6;
+    
+    /// RANSAC outlier threshold
+    double outlier_threshold = 7.81;
+
+    /// Levenberg-Marquardt initial lambda parameter for PnP calculation  
+    double lambda = 0.01;
+};
+
+/// Parameters governing tracking behavior
+struct TrackingParameters {
+    /// how many features would we like to detect and track overall 
+    size_t num_features = 200;
+
+    size_t num_features_init = 100;
+    size_t num_features_tracking = 50;
+    size_t num_features_tracking_bad = 20;
+    size_t num_features_needed_for_keyframe = 80;
+
+    /// maximum tracking duration (in seconds)
+    Timediff max_duration = Timediff(2.0);
+
+    /// maximum tracking distance (in meters)
+    double max_distance = 2.0;
+};
+
+struct FrontendParameters {
+    // which image event does trigger frame processing
+    Trigger trigger = Trigger::kTriggerColor;
+
+    // number of frames to skip between processing
+    unsigned skip_count = 0;
+
+    // seed value for random number generator
+    int seed = 12345;
+
+    // parameters for the ORB detector
+    orb::Parameters orb_parameters;
+
+    // parameters for optical flow
+    FlowParameters flow;
+
+    // Parameters for perspective and point optimization
+    PnpParameters pnp;
+
+    // Parameters governing tracking behavior
+    TrackingParameters tracking;
+};
+
+class AbsoluteTracker {
 public:
-    /// Configuration parameters and their defaults
-    struct Parameters {
-        orb::Parameters orb_parameters;
-
-        // max iterations for optical flow calculation
-        int flow_iterations_max = 30;
-
-        // error threshold for optical flow calculation
-        double flow_threshold = 0.5;
-
-        // the half-window size around each feature to use for optical flow calculation
-        int flow_omega = 3;
-
-        // the number of mimap levels to generate for optical flow calculation
-        int flow_pyramid_levels = 4;
-
-        // RANSAC iteration limit
-        size_t max_iterations = 30;
-        
-        // RANSAC sample size
-        size_t sample_size = 6;
-        
-        /// RANSAC outlier threshold
-        double outlier_threshold = 7.81;
-
-        /// Levenberg-Marquardt initial lambda parameter for PnP calculation  
-        double lambda = 0.01;
-
-        int num_features = 200;
-        int num_features_init = 100;
-        int num_features_tracking = 50;
-        int num_features_tracking_bad = 20;
-        int num_features_needed_for_keyframe = 80;
-
-        // max distance between keyframes
-        // Issue: how to determine units?
-        double max_keyframe_distance = 10.0;
-
-        // maximum interval between keyframes
-        Timediff max_keyframe_interval = Timediff(1.0);
-
-        // seed value for random number generator
-        int seed = 12345;
-
-        // number of frames to skip between processing (0 = none)
-        size_t skip_count = 0;
-    };
-
-    /// How lost are we?
-    enum class Status {
-        /// Just starting up and warming up to first sensor readings
-        kInitializing,
-
-        /// Successfully tracking with sufficient frame-to-frame information
-        kTracking,
-
-        /// Need to create a new keyframe
-        kNewKeyframe,
-    };
-
-    /// determine whether color or depth image trigger processing of the next frame
-    enum class Trigger: bool {
-        /// the color image will trigger processing
-        kTriggerColor,
-
-        /// the depth image will trigger processing
-        kTriggerDepth
-    };
-
-    RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const StereoDepthCamera& depth_camera);
-
-    void set_trigger(Trigger trigger) { trigger_ = trigger; }
-    Trigger trigger() const { return trigger_; }
-
-    const Parameters& parameters() const { return parameters_; }
+    AbsoluteTracker(const FrontendParameters& parameters, 
+                    const Camera& rgb_camera, const StereoDepthCamera& depth_camera)
+        : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera),
+          state_(TrackingState::kInitializing), detector_(parameters.orb_parameters),
+          skip_count_(0), random_engine_(parameters.seed) {}
 
     /// Event handler for an incoming color image from the RGB camera
     ///
@@ -176,169 +221,50 @@ public:
     /// \param event the event data structure procviding access to the image data
     void HandleDepthEvent(const DepthImageEvent& event);
 
-    /// Event handler for a processed keyframe. This event is actually generated by the
-    /// frontend itself. Processing the event via the event system facilitates coordination.
-    /// 
-    /// \param event event object providing access to the keyframe information
-    void HandleKeyframePoseEvent(const KeyframePoseEvent& event);
+    EventListenerList<InitializedEvent> initialization;
+    EventListenerList<TrackingEvent> tracking;
+    EventListenerList<TrackingLostEvent> tracking_lost;
+    EventListenerList<KeyframeEvent> keyframes;
 
-    /// Downstream modules subscribe here for notification when a new keyframe is available.
-    /// Processing time should be minimal or move to a separate thread.
-    EventListenerList<RgbdFrameEvent> keyframes;
+protected:
+    void ProcessCurrentImages(Timestamp timestamp);
+    void DidInitialize();
+    bool ReferenceFromCurrent();
 
-    /// Testing and debugging code can subscribe here to get notified when a video frame has been
-    /// processed.
-    EventListenerList<ProcessedFrameEvent> processed_frames;
+    void DoInitialize(Timestamp timestamp);
 
-    /// Testing and debugging code can subscribe here to get notified when we have aligned the
-    /// point clouds associated with two successive frames
-    EventListenerList<PointCloudAlignmentEvent> point_cloud_alignments;
+    void DidTrack();
+
+    void LostTracking();
+
+    void DoTracking(Timestamp timestamp);
+
+    void DoRecover(Timestamp timestamp);
+
+    // Post a new keyframe
+    void PostKeyframe(const TrackerState& state, const Descriptors& descriptors);
+
+    // Create a keyframe event from a tracking state
+    KeyframeEvent CreateKeyFrameEvent(const TrackerState& state, const Descriptors& descriptors);
 
 private:
-    using KeyPoints = std::vector<orb::KeyPoint>;
-    struct KeyframePoseUpdate {
-        Timestamp timestamp;
-        SE3d previous_pose;
-        SE3d new_pose;
-    };
+    FrontendParameters parameters_;
+    TrackingState state_;
+    unsigned skip_count_;
 
-    using KeyframePoseUpdates = std::queue<KeyframePoseUpdate>;
+    TrackerState reference_state_;
+    TrackerState current_state_;
 
-    // Trigger a key frame event using the current frame and tracking information
-    void PostKeyframe();
-
-    // Notify subscribed listeners on processing of a new video frame
-    void PostProcessedFrame(Timestamp timestamp, Status old_state, Status new_state, const SE3d& pose,
-                            size_t num_tracked_features, bool is_keyframe);
-
-    // Notify subscribed listeners about the computation of a point cloud alignment
-    void PostPointCloudAlignment(Timestamp timestamp, const SE3d& relative_motion,
-                                 const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
-                                 const std::vector<uchar>& inliers);
-
-    /// Process the next frame and create an updated pose estimation
-    void ProcessFrame();
-
-    /// Run the feature detector on the RGB data and extract keyframe feature points
-    size_t DetectKeyframeFeatures();
-
-    /// Run the feature detector on the RGB data and extract additional keypoints
-    size_t DetectAdditionalFeatures(size_t num_additonal);
-
-    /// Use optical flow to find the key points detected in the previous frame in the current frame
-    size_t FindFeaturesInCurrent(std::vector<Point2f>& points);
-
-    /// Track previously identified features in a new frame to process
-    size_t TrackFeatures();
-
-    /// Use an estimated camera pose and depth information to predict key point positions
-    void PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vector<Point2f>& points);
-
-    // Reset all feature vectors
-    void ClearFeatureVectors();
-
-    // Various configuration prameters
-    Parameters parameters_;
-
-    /// Parameters describing the RGB camera
-    const Camera& rgb_camera_;
-
-    /// Parameters describing the depth camera
-    const StereoDepthCamera& depth_camera_;
-
-    /// Processing trigger
-    Trigger trigger_;
-
-    /// Current processing status
-    Status status_;
-
-    /// Timepoint last processed frame
-    Timestamp last_processed_time_;
-
-    /// Pose associated with the previous frame
-    Sophus::SE3d current_pose_;
-
-    /// Camera data per frame to be processed
-    RgbdFrameData current_frame_data_;
-
-    /// Pose associated with the previous frame
-    Sophus::SE3d previous_pose_;
-
-    /// Timestamp of last keyframe
-    Timestamp last_keyframe_timestamp_;
-
-    /// Pose associated with the most recent key frame
-    Sophus::SE3d last_keyframe_pose_;
-
-    /// Distance since last keyframe
-    double distance_since_last_keyframe_;
-
-    /// Queue of keyframe pose adjustments coming back from the backend
-    KeyframePoseUpdates keyframe_pose_updates_;
-
-    /// Previous frame data
-    RgbdFrameData previous_frame_data_;
-
-    /// Keypoints/features tracked
-    KeyPoints key_points_;
-
-    /// Associated feature descriptors
-    Descriptors descriptors_;
-
-    /// Keypoints/features tracked
-    std::vector<Point2f> tracked_features_;
-
-    /// 3-D coordinates of tracked features
-    std::vector<Point3d> tracked_feature_coords_;
-
-    /// Relative motion between previous two frames
-    Sophus::SE3d relative_motion_;
-
-    /// Tangent representation (log) of relative_motion_
+    // current motion "velocity"
     Sophus::SE3d::Tangent relative_motion_twist_;
-    
-    /// Feature detector
-    orb::Detector feature_detector_;
+
+    Camera rgb_camera_;
+    StereoDepthCamera depth_camera_;
+
+    orb::Detector detector_;
 
     /// Random number generator to use
     std::default_random_engine random_engine_;
-
-    /// downsampling counter
-    size_t skip_count_;
-};
-
-/// Representation of a tracking event that the frontend creates upon processing of an
-/// incoming frame.
-///
-/// This is primarily intended for testing and debugging
-struct ProcessedFrameEvent: public Event {
-    // tracking status before and after this state transition
-    RgbdFrontend::Status old_state, new_state;
-
-    // estimated pose for this frame
-    Sophus::SE3d pose;
-
-    // number of tracked features
-    size_t num_tracked_features;
-
-    // is this recorded as keyframe?
-    bool is_keyframe;
-};
-
-/// Representation of a point cloud alignment that is used to determine the relative
-/// pose between two successive frames
-struct PointCloudAlignmentEvent: public Event {
-    /// estimated relative motion
-    Sophus::SE3d relative_motion;
-
-    /// the reference point cloud
-    std::vector<Point3d> reference;
-
-    /// the transformed point cloud (via relative_motion)
-    std::vector<Point3d> transformed;
-
-    /// the set of inlier points
-    std::vector<bool> inliers;
 };
 
 } // namespace slammer

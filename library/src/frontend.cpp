@@ -33,7 +33,6 @@
 #include "slammer/events.h"
 #include "slammer/flow.h"
 #include "slammer/pnp.h"
-#include "slammer/backend.h"
 
 
 using namespace slammer;
@@ -43,9 +42,9 @@ namespace {
 // Depth scale used: https://lifelong-robotic-vision.github.io/dataset/scene
 static constexpr double kDepthScale = 0.001;
 
-inline double DepthForPixel(const RgbdFrameData& frame, Point2f point) {
+inline double DepthForPixel(const DepthImage& depth_image, Point2f point) {
     float column = point.x, row = point.y; 
-    auto depth = const_view(*frame.depth).at(floorf(column), floorf(row))[0];
+    auto depth = const_view(*depth_image).at(floorf(column), floorf(row))[0];
 
     // 0 depth represents a missing depth value, so we convert those to an NaN value instead
     return depth ? kDepthScale * depth : std::numeric_limits<double>::signaling_NaN();
@@ -97,119 +96,32 @@ void MaskNaN(const std::vector<Point3d>& points, std::vector<uchar>& mask) {
     }
 }
 
-inline bool NotNaN(const Point3d& point) {
-    return !isnan(point.sum());
-}
+} // namespace 
 
-inline bool NotNaN(const std::vector<Point3d>& points) {
-    return NotNaN(std::reduce(begin(points), end(points)));
-}
+void AbsoluteTracker::HandleColorEvent(const ColorImageEvent& event) {
+    current_state_.color_image = event.image;
 
-}
-
-RgbdFrontend::RgbdFrontend(const Parameters& parameters, const Camera& rgb_camera, const StereoDepthCamera& depth_camera)
-    : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera), 
-      feature_detector_(parameters.orb_parameters),
-      status_(Status::kInitializing), random_engine_(parameters.seed), trigger_(Trigger::kTriggerColor),
-      distance_since_last_keyframe_(0.0), skip_count_(0) {}
-
-// -----------------------------------------------------------------------------------------------
-// Incoming event handlers
-// -----------------------------------------------------------------------------------------------
-
-void RgbdFrontend::HandleColorEvent(const ColorImageEvent& event) {
-    current_frame_data_.time_rgb = event.timestamp;
-    current_frame_data_.rgb = event.image;
-
-    if (trigger_ == Trigger::kTriggerColor) {
-        ProcessFrame();
+    if (parameters_.trigger == Trigger::kTriggerColor) {
+        ProcessCurrentImages(event.timestamp);
     }
 }
 
-void RgbdFrontend::HandleDepthEvent(const DepthImageEvent& event) {
-    current_frame_data_.time_depth = event.timestamp;
-    current_frame_data_.depth = event.image;
+void AbsoluteTracker::HandleDepthEvent(const DepthImageEvent& event) {
+    current_state_.depth_image = event.image;
 
-    if (trigger_ == Trigger::kTriggerDepth) {
-        ProcessFrame();
+    if (parameters_.trigger == Trigger::kTriggerDepth) {
+        ProcessCurrentImages(event.timestamp);
     }
 }
 
-void RgbdFrontend::HandleKeyframePoseEvent(const KeyframePoseEvent& event) {
-    assert(event.timestamp == event.keyframe->timestamp);
-    keyframe_pose_updates_.push(KeyframePoseUpdate {
-        event.timestamp,
-        event.previous_pose,
-        event.keyframe->pose
-    });
-}
+void AbsoluteTracker::ProcessCurrentImages(Timestamp timestamp) {
+    // TODO: Later, we could actually learn if color or depth should be used as trigger,
+    // or possibly use some form of interpolation
 
-// -----------------------------------------------------------------------------------------------
-// Outgoing events
-// -----------------------------------------------------------------------------------------------
-
-void RgbdFrontend::PostKeyframe() {
-    last_keyframe_pose_ = current_pose_;
-    
-    RgbdFrameEvent event;
-
-    last_keyframe_timestamp_ =
-        event.timestamp = std::max(current_frame_data_.time_rgb, current_frame_data_.time_depth);
-    event.frame_data = current_frame_data_;
-    event.pose = current_pose_;
-    event.keypoints = key_points_;
-    event.info.rgb = &rgb_camera_;
-    event.info.depth = &depth_camera_;
-    event.descriptions = std::move(descriptors_);
-
-    keyframes.HandleEvent(event);
-
-    distance_since_last_keyframe_ = 0.0;
-}
-
-void RgbdFrontend::PostProcessedFrame(Timestamp timestamp, Status old_state, Status new_state, const SE3d& pose,
-                                      size_t num_tracked_features, bool is_keyframe) {
-    if (processed_frames.has_listeners()) {
-        ProcessedFrameEvent event;
-
-        event.timestamp = timestamp;
-        event.old_state = old_state;
-        event.new_state = new_state;
-        event.pose = pose;
-        event.num_tracked_features = num_tracked_features;
-        event.is_keyframe = is_keyframe;
-
-        processed_frames.HandleEvent(event);
-    }
-}
-
-void 
-RgbdFrontend::PostPointCloudAlignment(Timestamp timestamp, const SE3d& relative_motion,
-                                      const std::vector<Point3d>& reference, 
-                                      const std::vector<Point3d>& transformed,
-                                      const std::vector<uchar>& inliers) {
-    if (point_cloud_alignments.has_listeners()) {
-        PointCloudAlignmentEvent event;
-
-        event.timestamp = timestamp;
-        event.relative_motion = relative_motion;
-        event.reference = reference;
-        event.transformed = transformed;
-        std::transform(inliers.begin(), inliers.end(), std::back_inserter(event.inliers),
-                       [](uchar ch) { return ch != 0; });
-
-        point_cloud_alignments.HandleEvent(event);
-    }
-}
-
-// -----------------------------------------------------------------------------------------------
-// Main tracking algorithm and supporting functions
-// -----------------------------------------------------------------------------------------------
-
-void RgbdFrontend::ProcessFrame() {
-    // Haven't received enough information yet; skip processing
-    if (!current_frame_data_.rgb || !current_frame_data_.depth)
+    // Let's make sure we have both images required
+    if (!current_state_.color_image || !current_state_.depth_image) {
         return;
+    }
 
     if (skip_count_) {
         --skip_count_;
@@ -218,279 +130,248 @@ void RgbdFrontend::ProcessFrame() {
 
     skip_count_ = parameters_.skip_count;
 
-    Timestamp now = std::max(current_frame_data_.time_depth, current_frame_data_.time_rgb);
-
-    // process any pending keyframe pose updates that the backend may have sent
-    while (!keyframe_pose_updates_.empty()) {
-        auto pose_update = keyframe_pose_updates_.front();
-        keyframe_pose_updates_.pop();
-
-        if (pose_update.timestamp <= last_keyframe_timestamp_) {
-
-            // relative_motion_ stays as is
-            // relative_motion_twist_stays as is
-            
-            auto last_relative = previous_pose_ * last_keyframe_pose_.inverse();
-            last_keyframe_pose_ = last_keyframe_pose_ * pose_update.previous_pose.inverse() * pose_update.new_pose;
-            previous_pose_ = last_relative * last_keyframe_pose_;
-        }
-    }
-
-    Status old_status = status_;
-    bool is_keyframe = false;
-
-    switch (status_) {
-    case Status::kInitializing:
-        // For now the same as generation of new keyframe; may do more callibration in the future
-
-    case Status::kNewKeyframe:
-        {
-            // estimate the current pose; this could be any pose, actually, because we are starting over
-            current_pose_ = previous_pose_;
-
-            ClearFeatureVectors();
-            size_t num_features = DetectKeyframeFeatures();
-
-            // if we have enough features, we can attempt to track in the next frame
-            if (num_features >= parameters_.num_features_tracking) {
-                PostKeyframe();
-                distance_since_last_keyframe_ = 0;
-                is_keyframe = true;
-                status_ = Status::kTracking;
-            } else {
-                assert(false);
-                abort();
-            }
-        }
+    // Dispatch to correct state function
+    switch (state_) {
+    case TrackingState::kInitializing:
+        DoInitialize(timestamp);
         break;
 
-    case Status::kTracking:
-        {
-            // estimate the current pose 
-            auto relative_motion = SE3d::exp(relative_motion_twist_ * (last_processed_time_ - now).count());
-            current_pose_ = relative_motion * previous_pose_;
+    case TrackingState::kTracking:
+    case TrackingState::kTrackingBad:
+        DoTracking(timestamp);
+        break;
 
-            previous_frame_data_ = current_frame_data_;
-            std::vector<Point2f> current_points; 
-
-            size_t num_features = FindFeaturesInCurrent(current_points);
-            std::vector<Point3d> current_coords;
-
-            // TODO: num_features < parameters_.num_features_tracking_bad
-            std::vector<uchar> mask;
-
-            for (const auto& point: current_points) {
-                auto z = DepthForPixel(current_frame_data_, point);
-                current_coords.push_back(rgb_camera_.PixelToCamera(point, z));
-                mask.push_back(!isnan(z) ? std::numeric_limits<uchar>::max() : 0);
-            }    
-
-            //assert(NotNaN(tracked_feature_coords_));
-            //assert(NotNaN(current_coords));
-
-            PerspectiveAndPoint3d::PointPairs point_pairs;
-
-            for (size_t index = 0; index < tracked_feature_coords_.size(); ++index) {
-                point_pairs.emplace_back(depth_camera_.CameraToPixelDisparity(tracked_feature_coords_[index]), 
-                                         depth_camera_.CameraToPixelDisparity(current_coords[index]));
-            }
-
-            // std::cout << "Differences" << std::endl;
-            // for (const auto& pair: point_pairs) {
-            //     std::cout << pair.second - pair.first << std::endl;
-            // }
-            // std::cout << std::endl;
-
-            PerspectiveAndPoint3d instance(depth_camera_, depth_camera_, point_pairs);
-            SE3d calculated_pose = current_pose_.inverse();
-
-            auto result =
-                instance.Ransac(calculated_pose, mask, tracked_feature_coords_, parameters_.sample_size, parameters_.max_iterations, parameters_.lambda, parameters_.outlier_threshold, random_engine_);
-
-            // TODO: What happens if we could not solve the optimization problem?
-            assert(result.ok());
-
-            relative_motion = calculated_pose.inverse();
-            PostPointCloudAlignment(now, relative_motion, tracked_feature_coords_, current_coords, mask);
-            
-            CompressInto(current_points, mask, tracked_features_);
-            CompressInto(current_coords, mask, tracked_feature_coords_);
-
-            num_features = tracked_features_.size();
-            current_pose_ = relative_motion * previous_pose_;
-
-            SE3d motion_since_last_keyframe = current_pose_ * last_keyframe_pose_.inverse();
-            double distance_since_last_keyframe_ = motion_since_last_keyframe.translation().norm();
-
-            if (distance_since_last_keyframe_ >= parameters_.max_keyframe_distance ||
-                num_features < parameters_.num_features_tracking_bad ||
-                now - last_keyframe_timestamp_ > parameters_.max_keyframe_interval) {
-                // need to create a new keyframe in next iteration
-                status_ = Status::kNewKeyframe;
-            } else {
-                // attempt to improve tracking with additional features
-                if (num_features < parameters_.num_features_tracking) {
-                    DetectAdditionalFeatures(parameters_.num_features - num_features);
-                }
-            }
-        }
-
+    case TrackingState::kTrackingLost:
+        DoRecover(timestamp);
         break;
     }
-
-    previous_frame_data_ = current_frame_data_;
-    relative_motion_ = current_pose_ * previous_pose_.inverse();
-    relative_motion_twist_ = relative_motion_.log() * (1.0/(last_processed_time_ - now).count());
-    previous_pose_ = current_pose_;
-    last_processed_time_ = now;
-
-    PostProcessedFrame(now, old_status, status_, current_pose_, tracked_features_.size(), is_keyframe);
 }
 
-void RgbdFrontend::ClearFeatureVectors() {
-    tracked_features_.clear();
-    tracked_feature_coords_.clear();
+void AbsoluteTracker::DidInitialize() {
+    if (initialization.has_listeners()) {
+        InitializedEvent event {
+            reference_state_.timestamp,
+            reference_state_.pose,
+            reference_state_.pixel_coords.size(),
+            reference_state_.color_image,
+            reference_state_.pixel_coords
+        };
+
+        initialization.HandleEvent(event);
+    }
 }
 
-size_t RgbdFrontend::DetectKeyframeFeatures() {
-    using std::begin, std::end;
+bool AbsoluteTracker::ReferenceFromCurrent() {
+    std::vector<orb::KeyPoint> key_points;
+    Descriptors descriptors;
 
-    feature_detector_.ComputeFeatures(const_view(*current_frame_data_.rgb), 
-                                        parameters_.num_features, key_points_, &descriptors_);
+    detector_.ComputeFeatures(const_view(*current_state_.color_image), 
+                                parameters_.tracking.num_features, key_points,
+                                &descriptors);
 
-    // add new features to tracked feature set
-    tracked_features_.clear();
-    tracked_feature_coords_.clear();
+    if (key_points.size() >= parameters_.tracking.num_features_init) {
+        // capture the images as reference
+        reference_state_.color_image = current_state_.color_image;
+        reference_state_.depth_image = current_state_.depth_image;
 
-    for (const auto& point: key_points_) {
-        auto z = DepthForPixel(current_frame_data_, point.coords);
+        // add new features to tracked feature set
+        reference_state_.pixel_coords.clear();
+        reference_state_.camera_coords.clear();
 
-        if (!isnan(z)) {
-            tracked_features_.push_back(point.coords);
-            auto camera_point = rgb_camera_.PixelToCamera(point.coords, z);
-            assert(NotNaN(camera_point));
-            tracked_feature_coords_.push_back(camera_point);
-        }
-    }    
+        for (const auto& point: key_points) {
+            auto z = DepthForPixel(current_state_.depth_image, point.coords);
 
-    return tracked_features_.size();
-}
-
-size_t RgbdFrontend::DetectAdditionalFeatures(size_t num_additonal) {
-    using std::begin, std::end;
-    using namespace boost::gil;
-
-    gray8_image_t feature_mask(current_frame_data_.rgb->width(), current_frame_data_.rgb->height());
-    auto mask = view(feature_mask); 
-    const auto kFillValue = gray8_pixel_t(std::numeric_limits<gray8_pixel_t::value_type>::max());
-
-    for (const auto &point: tracked_features_) {
-        int x_min = std::max(ptrdiff_t(floorf(point.x)) - parameters_.orb_parameters.min_distance, (ptrdiff_t) 0);
-        int x_max = std::min(ptrdiff_t(floorf(point.x)) + parameters_.orb_parameters.min_distance + 1, mask.width());
-        int y_min = std::max(ptrdiff_t(floorf(point.y)) - parameters_.orb_parameters.min_distance, (ptrdiff_t) 0);
-        int y_max = std::min(ptrdiff_t(floorf(point.y)) + parameters_.orb_parameters.min_distance + 1, mask.height());
-
-        for (auto y = y_min; y < y_max; ++y) {
-            auto iter = mask.row_begin(y);
-
-            for (auto x = x_min; x < x_max; ++x) {
-                iter[x] = kFillValue;
+            if (!isnan(z)) {
+                reference_state_.pixel_coords.push_back(point.coords);
+                auto camera_point = rgb_camera_.PixelToCamera(point.coords, z);
+                reference_state_.camera_coords.push_back(camera_point);
             }
+        }    
+
+        reference_state_.timestamp = current_state_.timestamp;
+        reference_state_.pose = current_state_.pose;
+
+        if (key_points.size() >= parameters_.tracking.num_features_needed_for_keyframe) {
+            PostKeyframe(reference_state_, descriptors);
         }
-    }
 
-    KeyPoints additional_points;
-    auto const_mask = const_view(feature_mask);
-
-    feature_detector_.ComputeFeatures(const_view(*current_frame_data_.rgb), 
-                                      parameters_.num_features, additional_points, nullptr, &const_mask);
-        
-    if (additional_points.size() > num_additonal) {
-        additional_points.resize(num_additonal);
-    }
-
-    for (const auto& point: additional_points) {
-        auto z = DepthForPixel(current_frame_data_, point.coords);
-
-        if (!isnan(z)) {
-            tracked_features_.push_back(point.coords);
-            tracked_feature_coords_.push_back(rgb_camera_.PixelToCamera(point.coords, z));
-        }
-    }    
-
-    return tracked_features_.size();
-}
-
-size_t RgbdFrontend::FindFeaturesInCurrent(std::vector<Point2f>& current_points) {
-    // We initialize key point locations in the current frame with their location in the previous frame.
-    // In a later iteration, we may want to predict the new position using additional information, such
-    // as by assuming linear motion in pixel space (using flow directions calculated in a previous iteration)
-    // or by backprojecting the 3d position using an estimated camera pose for the current frame.
-    // Initialization of the current point locations requires setting the `cv::OPTFLOW_USE_INITIAL_FLOW flag`
-    // in `cv::calcOpticalFlowPyrLK`.
-    if (status_ == Status::kTracking) {
-        PredictFeaturesInCurrent(current_pose_, current_points);
+        return true;
     } else {
-        current_points = tracked_features_;
+        return false;
     }
+}
 
+void AbsoluteTracker::DoInitialize(Timestamp timestamp) {
+    // keep track of time
+    current_state_.timestamp = timestamp;
+
+    // initialize the current and reference pose to origin; this may need to changed later
+    current_state_.pose = SE3d();
+
+    // initialize the "velocity" to zero
+    relative_motion_twist_.setZero();
+
+    if (ReferenceFromCurrent()) {
+        // update state 
+        state_ = TrackingState::kTracking;
+
+        DidInitialize();       
+    }
+}
+
+void AbsoluteTracker::DidTrack() {
+    if (tracking.has_listeners()) {
+        TrackingEvent event {
+            current_state_.timestamp,
+            current_state_.pose,
+            reference_state_.pixel_coords.size(),
+            current_state_.color_image,
+            current_state_.pixel_coords,
+            reference_state_.pixel_coords
+        };
+
+        tracking.HandleEvent(event);
+    }
+}
+
+void AbsoluteTracker::LostTracking() {
+    if (tracking_lost.has_listeners()) {
+        TrackingLostEvent event {
+            current_state_.timestamp,
+        };
+
+        tracking_lost.HandleEvent(event);
+    }
+}
+
+void AbsoluteTracker::DoTracking(Timestamp timestamp) {
     std::vector<float> error;
 
     // TODO: Refactor this such that the same conversion can be used for feature detection
-    auto source = RgbToGrayscale(const_view(*previous_frame_data_.rgb));
-    auto target = RgbToGrayscale(const_view(*current_frame_data_.rgb));
+    auto source = RgbToGrayscale(const_view(*reference_state_.color_image));
+    auto target = RgbToGrayscale(const_view(*current_state_.color_image));
+
+    // last tracked pose versus refrence pose
+    auto incremental_pose = reference_state_.pose.inverse() * current_state_.pose;
+
+    auto arg = relative_motion_twist_ * (timestamp - current_state_.timestamp).count();
+    auto estimated_motion = SE3d::exp(arg);
+    auto estimated_transform = (incremental_pose * estimated_motion).inverse();
+
+    current_state_.pixel_coords.clear();
+    std::transform(reference_state_.camera_coords.begin(), reference_state_.camera_coords.end(),
+        std::back_insert_iterator(current_state_.pixel_coords),
+        [&](const auto& point) { return rgb_camera_.CameraToPixel(estimated_transform * point); });
 
     ComputeFlow(const_view(source), const_view(target),
-                tracked_features_, current_points, error,
-                parameters_.flow_pyramid_levels, parameters_.flow_omega, parameters_.flow_threshold);
+                reference_state_.pixel_coords, current_state_.pixel_coords, error,
+                parameters_.flow.pyramid_levels, parameters_.flow.omega, parameters_.flow.threshold,
+                parameters_.flow.max_iterations);
 
-    float squared_error = parameters_.flow_threshold * parameters_.flow_threshold;
+    float squared_error = parameters_.flow.threshold * parameters_.flow.threshold;
 
+    // this mask captures the points we have been able to track well
+    // that is, they are still within the valid range of coordinates, and the error is controlled
     std::vector<uchar> mask;
-    std::transform(error.begin(), error.end(), std::back_inserter(mask),
-                   [=](float err) { return err <= squared_error; });
+    for (size_t index = 0; index < current_state_.pixel_coords.size(); ++index) {
+        const auto& point = current_state_.pixel_coords[index];
+        if (!isnan(point.x) && !isnan(point.y) && error[index] <= squared_error) {
+            mask.push_back(std::numeric_limits<uchar>::max());
+        } else {
+            mask.push_back(0);
+        }
+    }
 
-    Compress(tracked_features_, mask);
-    Compress(tracked_feature_coords_, mask);
-    Compress(current_points, mask);
+    // create 3d coordinates for tracked features
+    current_state_.camera_coords.clear();
 
-    return current_points.size();
-}
+    for (size_t index = 0; index < current_state_.pixel_coords.size(); ++index) {
+        if (!mask[index]) {
+            current_state_.camera_coords.push_back(Point3d());
+            continue;
+        }
 
-void RgbdFrontend::PredictFeaturesInCurrent(const SE3d& predicted_pose, std::vector<Point2f>& points) {
-    points.clear();
+        const auto& point = current_state_.pixel_coords[index];
+        auto z = DepthForPixel(current_state_.depth_image, point);
 
-    auto camera_to_robot = rgb_camera_.camera_to_robot();
-    //auto transform = camera_to_robot.inverse() * predicted_pose.inverse() * previous_pose_ * camera_to_robot;
-    //auto transform = predicted_pose.inverse() * previous_pose_;
-    auto transform = predicted_pose * previous_pose_.inverse();
+        if (isnan(z)) {
+            mask[index] = 0;
+        }
 
-    for (const auto& point: tracked_feature_coords_) {
-        auto transformed_point = transform * point;
-        points.push_back(rgb_camera_.CameraToPixel(transformed_point));
+        auto camera_point = rgb_camera_.PixelToCamera(point, z);
+        current_state_.camera_coords.push_back(camera_point);
+    }   
+
+    PerspectiveAndPoint3d::PointPairs point_pairs;
+
+    for (size_t index = 0; index < current_state_.pixel_coords.size(); ++index) {
+        point_pairs.emplace_back(depth_camera_.CameraToPixelDisparity(reference_state_.camera_coords[index]), 
+                                    depth_camera_.CameraToPixelDisparity(current_state_.camera_coords[index]));
+    }
+
+    PerspectiveAndPoint3d instance(depth_camera_, depth_camera_, point_pairs);
+    SE3d calculated_pose = incremental_pose.inverse();//estimated_transform;
+
+    auto result =
+        instance.Ransac(calculated_pose, mask, reference_state_.camera_coords, 
+                        parameters_.pnp.sample_size, parameters_.pnp.max_iterations, 
+                        parameters_.pnp.lambda, parameters_.pnp.outlier_threshold, 
+                        random_engine_);
+
+    if (!result.ok()) {
+        state_ = TrackingState::kTrackingLost;
+        LostTracking();
+        return;
+    }
+
+    auto new_pose = reference_state_.pose * calculated_pose.inverse();
+    relative_motion_twist_ = 
+        -(current_state_.pose * new_pose.inverse()).log() * (1.0/(timestamp - current_state_.timestamp).count());
+    current_state_.pose = new_pose;
+    current_state_.timestamp = timestamp;
+
+    Compress(current_state_.pixel_coords, mask);
+    Compress(reference_state_.pixel_coords, mask);
+    Compress(reference_state_.camera_coords, mask);
+
+    if (reference_state_.pixel_coords.size() < parameters_.tracking.num_features_tracking_bad) {
+        state_ = TrackingState::kTrackingLost;
+        LostTracking();
+        return;
+    }
+
+    DidTrack();
+
+    // Should we reset the reference?
+    if (current_state_.timestamp - reference_state_.timestamp >= parameters_.tracking.max_duration ||
+        calculated_pose.translation().norm() >= parameters_.tracking.max_distance) {
+        // create a new reference state from the current state, and possibly post this as keyframe
+        if (!ReferenceFromCurrent()) {
+            state_ = TrackingState::kTrackingBad;
+        }
     }
 }
 
+void AbsoluteTracker::DoRecover(Timestamp timestamp) {
 
+}
 
+void AbsoluteTracker::PostKeyframe(const TrackerState& state, const Descriptors& descriptors) {
+    if (keyframes.has_listeners()) {
+        keyframes.HandleEvent(CreateKeyFrameEvent(state, descriptors));
+    }
+}
 
-/*
-
-changes to the tracking algorithm:
-
-- Keypoints are calculated on an initial frame
-- If those key points are tracked successfully into the following frame, the previous frame and the trackable features
-    are submitted as key frame to the backend
-- For the purpose of performing VO, only 3d coordinates are utilized further (for predicting the location of features
-    and for estimating the relative motion)
-- The set of points utilized is reduced frame over frame due to the inability to match them or because they end up
-    as outliers during pose estimation
-- Determine if a mask or an index vector is more effective for tracking subsetting of the point set
-- the relative motion is stored and can be applied to extrapolate a pose estimate (check Sophus interpolate function)
-- restart looking for a new key frame once we have lost sufficiently many features in this process, we have traveled a
-    certain distance (parameter) or if we have exceeded a certain time interval (parameter)
-
-- IMU will inform motion estimates if/once available (versus extrapolation)
-
-*/
-
+KeyframeEvent AbsoluteTracker::CreateKeyFrameEvent(const TrackerState& state, const Descriptors& descriptors) {
+    return KeyframeEvent {
+        state.timestamp,
+        state.pose,
+        state.pixel_coords,
+        state.camera_coords,
+        descriptors,
+        state.color_image,
+        state.depth_image,
+        rgb_camera_,
+        depth_camera_
+    };
+}

@@ -31,20 +31,209 @@
 #include <stdexcept>
 
 #include <gtest/gtest.h>
+#include <sciplot/sciplot.hpp>
 
-#include "slammer/pipeline.h"
+#include "slammer/slammer.h"
+#include "slammer/frontend.h"
+#include "slammer/flow.h"
+#include "slammer/pnp.h"
+
 #include "slammer/loris/driver.h"
 #include "slammer/loris/opencv_utils.h"
+
 
 using namespace slammer;
 using namespace slammer::loris;
 
+namespace {
 
-TEST(FrontendTest, RunFrontend) {
+using namespace boost::gil;
+
+void LogFeatures(ImageLogger& logger, const std::string& name, const gray8c_view_t& image,
+                 const std::vector<Point2f>& points, const std::vector<Point2f>* secondary = nullptr) {
+    rgb8_image_t display_features(image.dimensions());
+    auto output = view(display_features);
+
+    copy_pixels(color_converted_view<rgb8_pixel_t>(image), output);
+
+    const rgb8_pixel_t red(255, 0, 0);
+    const rgb8_pixel_t blue(0, 0, 255);
+
+    if (secondary) {
+        for (auto point: *secondary) {
+            output(point.x, point.y) = blue;
+            output(point.x - 3, point.y) = blue;
+            output(point.x - 2, point.y) = blue;
+            output(point.x - 1, point.y) = blue;
+            output(point.x + 1, point.y) = blue;
+            output(point.x + 2, point.y) = blue;
+            output(point.x + 3, point.y) = blue;
+            output(point.x, point.y - 3) = blue;
+            output(point.x, point.y - 2) = blue;
+            output(point.x, point.y - 1) = blue;
+            output(point.x, point.y + 1) = blue;
+            output(point.x, point.y + 2) = blue;
+            output(point.x, point.y + 3) = blue;
+        }
+    }
+
+    for (auto point: points) {
+        if (isnan(point.x) || isnan(point.y)) {
+            continue;
+        }
+        
+        output(point.x, point.y) = red;
+        output(point.x - 3, point.y) = red;
+        output(point.x - 2, point.y) = red;
+        output(point.x - 1, point.y) = red;
+        output(point.x + 1, point.y) = red;
+        output(point.x + 2, point.y) = red;
+        output(point.x + 3, point.y) = red;
+        output(point.x, point.y - 3) = red;
+        output(point.x, point.y - 2) = red;
+        output(point.x, point.y - 1) = red;
+        output(point.x, point.y + 1) = red;
+        output(point.x, point.y + 2) = red;
+        output(point.x, point.y + 3) = red;
+    }
+
+    logger.LogImage(const_view(display_features), name);
+}
+
+class TrackingListener {
+public:
+    TrackingListener(const std::string& path)
+      : image_logger_(path) {}
+
+    void HandleGroundtruthEvent(const loris::GroundtruthEvent& event) {
+        current_groundtruth_pose = SE3d(event.orientation, Point3d::Zero()) * 
+            SE3d(SE3d::QuaternionType::Identity(), event.position);
+        groundtruth_path.push_back(event.position);
+    }
+
+    void HandleInitializedEvent(const InitializedEvent& event) {
+        ++num_frames;
+        current_timestamp = event.timestamp;
+        refernce_timestamp = event.timestamp;
+        reference_pose = event.pose;
+        reference_groundtruth_pose = current_groundtruth_pose;
+        estimated_path.push_back(event.pose);
+
+        auto gray = RgbToGrayscale(const_view(*event.image));
+        LogFeatures(image_logger_, fmt::format("initialized-{}.", event.timestamp.time_since_epoch().count()), 
+                    const_view(gray), event.features);
+    }
+
+    void HandleTrackingEvent(const TrackingEvent& event) {
+        ++num_frames;
+        is_tracking = true;
+        current_timestamp = event.timestamp;
+        current_pose = event.pose;
+        estimated_path.push_back(event.pose);
+
+        auto groundtruth_translation = (current_groundtruth_pose * reference_groundtruth_pose.inverse()).translation();
+        auto groundtruth_distance = groundtruth_translation.norm();
+        auto estimated_translation = (current_pose * reference_pose.inverse()).translation();
+        auto estimated_distance = estimated_translation.norm();
+
+        // should be within 90%?
+        auto diff = estimated_distance - groundtruth_distance;
+        //EXPECT_LE(fabs(diff), 0.1);
+
+        auto factor = estimated_distance / groundtruth_distance;
+
+        //EXPECT_GE(factor, 0.75);
+        //EXPECT_LE(factor, 1.25);
+
+        // EXPECT_EQ(estimated_distance, groundtruth_distance);
+
+        auto gray = RgbToGrayscale(const_view(*event.image));
+        LogFeatures(image_logger_, fmt::format("tracking-{}.", event.timestamp.time_since_epoch().count()), 
+                    const_view(gray), event.features, &event.reference);
+    }
+
+    void HandleTrackingLostEvent(const TrackingLostEvent& event) {
+        current_timestamp = event.timestamp;
+        is_tracking = false;
+    }
+
+    void HandleKeyframeEvent(const KeyframeEvent& event) {
+        ++num_keyframes;
+        image_logger_.LogImage(const_view(*event.color), 
+                               fmt::format("keyframe-{}.", event.timestamp.time_since_epoch().count()));
+    }
+
+    FileImageLogger image_logger_;
+
+    size_t num_frames = 0;
+    size_t num_keyframes = 0;
+    bool is_tracking = false;
+
+    SE3d current_groundtruth_pose;
+    SE3d reference_groundtruth_pose;
+    SE3d reference_pose;
+    SE3d current_pose;
+    Timestamp refernce_timestamp;
+    Timestamp current_timestamp;
+    std::vector<Point3d> groundtruth_path;
+    std::vector<SE3d> estimated_path;
+};
+
+void PlotPath(const std::string& filename, const std::vector<Point3d>& locations, bool use_z = true) {
+    using namespace sciplot;
+
+    Plot plot;
+
+    std::vector<double> x, y, z;
+
+    for (const auto& location: locations) {
+        x.push_back(location.x());
+        y.push_back(location.y());
+        z.push_back(location.z());
+    }
+
+    plot.drawCurve(x, use_z ? z : y);
+
+    plot.save(filename);
+}
+
+void PlotPath(const std::string& filename, const std::vector<SE3d>& poses, bool use_z = true) {
+    using namespace sciplot;
+
+    Plot plot;
+
+    std::vector<double> x, y, z;
+
+    for (const auto& pose: poses) {
+        const auto& translation = pose.translation();
+        x.push_back(translation.x());
+        y.push_back(translation.y());
+        z.push_back(translation.z());
+    }
+
+    plot.drawCurve(x, use_z ? z : y);
+
+    plot.save(filename);
+}
+
+} // namespace
+
+// Test tracking relative to the first frame
+//
+// Debugging information to generate along the way:
+//  - Image logs showing how features are mapped
+//  - Pose relative to first frame as calculated
+//  - Pose relative to first frame as provided by ground truth
+//
+// To consider: instead of tracking via optical flow, we could equally
+// compare the results to key point detection and matchng for each frame
+TEST(FrontendTest, TestFrontend) {
     using namespace std::placeholders;
 
     std::string kDataSetPath("data/cafe1-1");
+    Driver driver(kDataSetPath);
     
+    // get the color and depth camera objects for the data set
     Result<SensorInfo> sensor_info_result = ReadSensorInfo(kDataSetPath);
     EXPECT_TRUE(sensor_info_result.ok());
     auto sensor_info = sensor_info_result.value();
@@ -53,155 +242,58 @@ TEST(FrontendTest, RunFrontend) {
     EXPECT_TRUE(frame_info_result.ok());
     auto frame_info = frame_info_result.value();
 
-    Driver driver(kDataSetPath);
-
     auto rgb_camera_pose = GetFramePose(frame_info, "d400_color_optical_frame");
     EXPECT_TRUE(rgb_camera_pose.ok());
     auto depth_camera_pose = GetFramePose(frame_info, "d400_depth_optical_frame");
     EXPECT_TRUE(depth_camera_pose.ok());
 
     Camera rgb_camera = CreateCamera(sensor_info.d400_color_optical_frame, rgb_camera_pose.value());
-    //Camera depth_camera = CreateCamera(sensor_info.d400_depth_optical_frame, depth_camera_pose.value());
     StereoDepthCamera depth_camera = CreateAlignedStereoDepthCamera(sensor_info.d400_depth_optical_frame, 0.05, depth_camera_pose.value());
-    RgbdFrontend::Parameters frontend_parameters;
 
-    // process only subset of frame/sec
-    frontend_parameters.skip_count = 29;
-    frontend_parameters.max_keyframe_interval = Timediff(1.0);
-    frontend_parameters.outlier_threshold = 7.81;
+    FrontendParameters parameters;
 
-    RgbdFrontend frontend(frontend_parameters, rgb_camera, depth_camera);
+    parameters.tracking.max_duration = Timediff(0.9);
 
-    driver.color.AddHandler(std::bind(&RgbdFrontend::HandleColorEvent, &frontend, _1));
-    driver.aligned_depth.AddHandler(std::bind(&RgbdFrontend::HandleDepthEvent, &frontend, _1));
+    AbsoluteTracker tracker(parameters, rgb_camera, depth_camera);
+    driver.color.AddHandler(std::bind(&AbsoluteTracker::HandleColorEvent, &tracker, _1));
+    driver.aligned_depth.AddHandler(std::bind(&AbsoluteTracker::HandleDepthEvent, &tracker, _1));
 
-    struct FrontendListener {
-        RgbdFrontend& frontend;
-        size_t num_frames, num_keyframes;
-        Timestamp min_time, max_time, last_timestamp;
+    TrackingListener listener("image_logs/frontend_test/test_frontend");
+    driver.groundtruth.AddHandler(std::bind(&TrackingListener::HandleGroundtruthEvent, &listener, _1));
+    tracker.initialization.AddHandler(std::bind(&TrackingListener::HandleInitializedEvent, &listener, _1));
+    tracker.tracking.AddHandler(std::bind(&TrackingListener::HandleTrackingEvent, &listener, _1));
+    tracker.tracking_lost.AddHandler(std::bind(&TrackingListener::HandleTrackingLostEvent, &listener, _1));
+    tracker.keyframes.AddHandler(std::bind(&TrackingListener::HandleKeyframeEvent, &listener, _1));
 
-        // groundtruth values are captured here
-        SE3d groundtruth_pose;
-
-        // as estimated by frontend
-        bool has_last_keyframe_pose;
-        SE3d last_keyframe_pose;
-        SE3d last_keyframe_groundtruth_pose;
-
-        // as estimated by frontend
-        bool has_last_pose;
-        SE3d last_pose;
-        SE3d last_groundtruth_pose;
-
-        FrontendListener(RgbdFrontend& frontend)
-            : frontend(frontend), num_frames(0), num_keyframes(0), has_last_keyframe_pose(false),
-                min_time(Timestamp(Timediff(std::numeric_limits<double>::max()))),
-                max_time(Timestamp(Timediff(std::numeric_limits<double>::min()))) {}
-
-        void HandleFrameEvent(const ProcessedFrameEvent& event) {
-            if (num_frames) {
-                EXPECT_GT(event.timestamp, last_timestamp);
-                last_timestamp = event.timestamp;
-            }
-
-            ++num_frames;
-            num_keyframes += event.is_keyframe;
-
-            min_time = std::min(min_time, event.timestamp);
-            max_time = std::max(max_time, event.timestamp);
-
-            auto pose = event.pose;
-            auto rotation = pose.unit_quaternion();
-            auto translation = pose.translation();
-
-            EXPECT_FALSE(std::isnan(rotation.x()));
-            EXPECT_FALSE(std::isnan(rotation.y()));
-            EXPECT_FALSE(std::isnan(rotation.z()));
-            EXPECT_FALSE(std::isnan(rotation.w()));
-
-            EXPECT_FALSE(std::isnan(translation.x()));
-            EXPECT_FALSE(std::isnan(translation.y()));
-            EXPECT_FALSE(std::isnan(translation.z()));
-
-            // Make sure we do not loose track right after establishing a new keyframe
-            EXPECT_TRUE(event.new_state == RgbdFrontend::Status::kTracking ||
-                        event.old_state != RgbdFrontend::Status::kNewKeyframe);
-
-            if (event.old_state == RgbdFrontend::Status::kTracking &&
-                event.new_state == RgbdFrontend::Status::kTracking) {
-                EXPECT_GE(event.num_tracked_features, frontend.parameters().num_features_tracking_bad);
-            }
-
-            if (event.is_keyframe) {
-                EXPECT_GE(event.num_tracked_features, frontend.parameters().num_features_tracking);
-
-                if (has_last_keyframe_pose) {
-                    auto groundtruth_translation = (groundtruth_pose * last_keyframe_groundtruth_pose.inverse()).translation();
-                    auto groundtruth_distance = groundtruth_translation.norm();
-                    auto estimated_translation = (event.pose * last_keyframe_pose.inverse()).translation();
-                    auto estimated_distance = estimated_translation.norm();
-
-                    // should be within 90%?
-                    auto diff = estimated_distance - groundtruth_distance;
-                    EXPECT_LE(fabs(diff), 0.1);
-
-                    auto factor = estimated_distance / groundtruth_distance;
-
-                    EXPECT_GE(factor, 0.9);
-                    EXPECT_LE(factor, 1.1);
-
-                    EXPECT_EQ(estimated_distance, groundtruth_distance);
-                }
-
-                last_keyframe_pose = event.pose;
-                last_keyframe_groundtruth_pose = groundtruth_pose;
-                has_last_keyframe_pose = true;
-            } else {
-                if (has_last_pose) {
-                    auto groundtruth_translation = (groundtruth_pose * last_groundtruth_pose.inverse()).translation();
-                    auto groundtruth_distance = groundtruth_translation.norm();
-                    auto estimated_translation = (event.pose * last_pose.inverse()).translation();
-                    auto estimated_distance = estimated_translation.norm();
-
-                    // should be within 90%?
-                    auto diff = estimated_distance - groundtruth_distance;
-                    EXPECT_LE(fabs(diff), 0.1);
-
-                    auto factor = estimated_distance / groundtruth_distance;
-
-                    EXPECT_GE(factor, 0.9);
-                    EXPECT_LE(factor, 1.1);
-
-                    EXPECT_EQ(estimated_distance, groundtruth_distance);
-                }
-            }
-
-            last_pose = event.pose;
-            last_groundtruth_pose = groundtruth_pose;
-            has_last_pose = true;
-        }
-
-        void HandleGroundtruthEvent(const loris::GroundtruthEvent& event) {
-            groundtruth_pose = SE3d(event.orientation, Point3d::Zero()) * 
-                SE3d(SE3d::QuaternionType::Identity(), event.position);;
-        }
-    };
-
-    FrontendListener listener(frontend);
-    frontend.processed_frames.AddHandler(std::bind(&FrontendListener::HandleFrameEvent, &listener, _1));
-    driver.groundtruth.AddHandler(std::bind(&FrontendListener::HandleGroundtruthEvent, &listener, _1));
-
-    // run for 2 secs of simulated events
-    auto result = driver.Run(slammer::Timediff(60.0));
+    // run for 5 secs of simulated events
+    auto result = driver.Run(slammer::Timediff(5.0));
     EXPECT_TRUE(result.ok());
-    EXPECT_LE(listener.max_time - listener.min_time, Timediff(10.0));
+    EXPECT_TRUE(listener.is_tracking);
+    EXPECT_EQ(listener.num_frames, 149);
+    EXPECT_EQ(listener.num_keyframes, 6);
 
-    // 2 secs @ 30 frames/sec, minus 1 frame because the recording doesn't start with a frame at the very beginning
-    EXPECT_EQ(listener.num_frames, 59);
-
-    // So we stepped through the code convincing ourselves that this result is meaningful
-    EXPECT_EQ(listener.num_keyframes, 4);
-
-    // TODO: Compare estimated distance (which determines the number of keyframes) against provided ground truth
-    // and/or the provided odometer readings. This may not be the same, but should be somewhat close
+    PlotPath("image_logs/frontend_test/test_frontend/groundtruth.png", listener.groundtruth_path, false);
+    PlotPath("image_logs/frontend_test/test_frontend/estimated.png", listener.estimated_path, true);
 }
+
+/*
+- Render the sequence of poses; create such graphs both for the baseline and the estimated poses
+- Add functionality to create new reference frames while keeping track of the current pose
+- What criteria would trigger the creation of a new reference frame?
+    - Low number of features tracked 
+    - Degree to which the camera has swept the space
+    - Are all features tracked confined to a small section of the image?
+    - Number of frames/seconds since last reference frame was taken
+    - Are there specific attributed that would make one frame preferable of others? (blurriness)
+- How should we handle situations where tracking is lost; that is, how to restart and continue
+- Should we handle situations where images cannot be captured? (e.g. lights off)
+- Add feature descriptor calculation to reference frame processing
+- Add posting of reference frames
+
+- Refactor AbsoluteTracker into new FrontEnd class
+
+
+
+
+
+*/

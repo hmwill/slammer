@@ -48,21 +48,20 @@ Map::~Map() {
     landmarks_.clear();
 }
 
-KeyframePointer Map::CreateKeyframe(const RgbdFrameEvent& event) {
+KeyframePointer Map::CreateKeyframe(const KeyframeEvent& event) {
     auto result = std::make_shared<Keyframe>();
 
     result->timestamp = event.timestamp;
     result->pose = event.pose;
     result->pinned = false;
     
-    auto depth_image = boost::gil::const_view(*event.frame_data.depth);
+    auto depth_image = boost::gil::const_view(*event.depth);
 
-    for (const auto& keypoint: event.keypoints) {
+    for (size_t index = 0; index < event.keypoints.size(); ++index) {
         auto feature = std::make_shared<Feature>();
 
-        feature->keypoint = keypoint;
-        feature->depth = //std::numeric_limits<double>::signaling_NaN();
-            static_cast<double>(depth_image.at(keypoint.coords.x, keypoint.coords.y)[0]);
+        feature->keypoint = event.keypoints[index];
+        feature->coords = event.keypoint_coords[index];
 
         feature->keyframe = result;
 
@@ -105,15 +104,15 @@ void Map::CreateLandmarksForUnmappedFeatures(const Camera& camera, const Keyfram
 
 LandmarkId Map::CreateLandmark(const Camera& camera, const FeaturePointer& feature) {
     auto keyframe = feature->keyframe.lock();
-    // TODO: how to get the coordinates
-    Point3d coord = camera.PixelToCamera(feature->keypoint.coords, feature->depth);
-    Point3d location = keyframe->pose * coord;
+
+    Point3d coords = feature->coords;
+    Point3d location = keyframe->pose.inverse() * coords;
 
     auto landmark = std::make_shared<Landmark>();
     landmark->id = next_landmark_id_++;
     landmark->location = location;
     landmark->variances = Matrix3d::Identity();
-    landmark->normal = -coord.normalized();
+    landmark->normal = -coords.normalized();
     landmark->observations.push_back(feature);
     landmarks_[landmark->id] = landmark;
 
