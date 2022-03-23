@@ -254,9 +254,9 @@ TEST(FrontendTest, TestFrontend) {
 
     parameters.tracking.max_duration = Timediff(0.9);
 
-    AbsoluteTracker tracker(parameters, rgb_camera, depth_camera);
-    driver.color.AddHandler(std::bind(&AbsoluteTracker::HandleColorEvent, &tracker, _1));
-    driver.aligned_depth.AddHandler(std::bind(&AbsoluteTracker::HandleDepthEvent, &tracker, _1));
+    Frontend tracker(parameters, rgb_camera, depth_camera);
+    driver.color.AddHandler(std::bind(&Frontend::HandleColorEvent, &tracker, _1));
+    driver.aligned_depth.AddHandler(std::bind(&Frontend::HandleDepthEvent, &tracker, _1));
 
     TrackingListener listener("image_logs/frontend_test/test_frontend");
     driver.groundtruth.AddHandler(std::bind(&TrackingListener::HandleGroundtruthEvent, &listener, _1));

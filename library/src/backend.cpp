@@ -73,7 +73,7 @@ Backend::Backend(const Parameters& parameters, const Camera& rgb_camera, const C
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera),
         map_(map), keyframe_index_(keyframe_index) {}
 
-void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
+void Backend::HandleKeyframeEvent(const KeyframeEvent& frame) {
     auto previous_frame = map_.GetMostRecentKeyframe();
     auto keyframe = map_.CreateKeyframe(frame);
     auto original_pose = keyframe->pose;
@@ -81,7 +81,7 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
     if (!previous_frame) {
         // This is the first frame; let's just create landmarks for the features we have
         keyframe->pinned = true;
-        map_.CreateLandmarksForUnmappedFeatures(*frame.info.rgb, keyframe);
+        map_.CreateLandmarksForUnmappedFeatures(frame.rgb_camera, keyframe);
         return;
     }
 
@@ -140,13 +140,8 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
             std::vector<Point3d> keyframe_points, candidate_points;
 
             for (const auto& match: matches) {
-                auto keyframe_keypoint = keyframe->features[match.target_index]->keypoint.coords;
-                auto keyframe_depth = keyframe->features[match.target_index]->depth;
-                keyframe_points.push_back(rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth));
-
-                auto candidate_keypoint = keyframe->features[match.query_index]->keypoint.coords;
-                auto candidate_depth = keyframe->features[match.query_index]->depth;
-                candidate_points.push_back(rgb_camera_.PixelToCamera(candidate_keypoint, candidate_depth));
+                keyframe_points.push_back(keyframe->features[match.target_index]->coords);
+                candidate_points.push_back(keyframe->features[match.query_index]->coords);
             }
 
             SE3d relative_motion;
@@ -190,7 +185,7 @@ void Backend::HandleRgbdFrameEvent(const RgbdFrameEvent& frame) {
             OptimizePosesAndLocations(keyframes, landmarks, poses, locations);
             UpdatePosesAndLocations(keyframes, landmarks, poses, locations);
         } else {
-            map_.CreateLandmarksForUnmappedFeatures(*frame.info.rgb, keyframe);
+            map_.CreateLandmarksForUnmappedFeatures(frame.rgb_camera, keyframe);
         }
     }
 
@@ -238,13 +233,8 @@ bool Backend::DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePoin
         std::vector<Point3d> keyframe_points, candidate_points;
 
         for (const auto& match: matches) {
-            auto keyframe_keypoint = keyframe->features[match.target_index]->keypoint.coords;
-            auto keyframe_depth = keyframe->features[match.target_index]->depth;
-            keyframe_points.push_back(rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth));
-
-            auto candidate_keypoint = keyframe->features[match.query_index]->keypoint.coords;
-            auto candidate_depth = keyframe->features[match.query_index]->depth;
-            candidate_points.push_back(rgb_camera_.PixelToCamera(candidate_keypoint, candidate_depth));
+            keyframe_points.push_back(keyframe->features[match.target_index]->coords);
+            candidate_points.push_back(keyframe->features[match.query_index]->coords);
         }
 
         SE3d relative_motion;
@@ -457,9 +447,7 @@ Backend::EstimateLocations(const Keyframes& keyframes, const Landmarks& landmark
                 continue;
             }
 
-            auto keyframe_keypoint = feature->keypoint.coords;
-            auto keyframe_depth = feature->depth;
-            estimate = keyframe->pose.inverse() * rgb_camera_.PixelToCamera(keyframe_keypoint, keyframe_depth);
+            estimate = keyframe->pose.inverse() * feature->coords;
 
             break;
         }
@@ -551,7 +539,7 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
                 edge->setVertex( 0, optimizer.vertex(keyframe_index));
                 edge->setVertex( 1, optimizer.vertex(landmark_index + landmark_vertex_offset));
                 // TODO: At some point, we need to use robot coordinates instead of camera coordinates
-                edge->setMeasurement(inout ? locations[landmark_index] : rgb_camera_.PixelToCamera(feature->keypoint.coords, feature->depth));
+                edge->setMeasurement(inout ? locations[landmark_index] : feature->coords);
 
                 // TODO: Apply error model for depth measurement
                 edge->setInformation(Eigen::Matrix3d::Identity());

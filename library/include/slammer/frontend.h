@@ -203,9 +203,24 @@ struct FrontendParameters {
     TrackingParameters tracking;
 };
 
-class AbsoluteTracker {
+/// A record to keep track of the pose associated with a specific timestamp
+struct PoseRecord {
+    SE3d pose;
+    Timestamp timestamp;
+};
+
+/// The history of poses is used to reconcile pose updates from the backend
+/// with on-going tracking activity in the front-end.
+///
+/// The history can be appended to at the end and truncated at the beginning.
+using PoseQueue = std::deque<PoseRecord>;
+
+// Event type triggered by backend
+struct KeyframePoseEvent;
+
+class Frontend {
 public:
-    AbsoluteTracker(const FrontendParameters& parameters, 
+    Frontend(const FrontendParameters& parameters, 
                     const Camera& rgb_camera, const StereoDepthCamera& depth_camera)
         : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera),
           state_(TrackingState::kInitializing), detector_(parameters.orb_parameters),
@@ -213,13 +228,18 @@ public:
 
     /// Event handler for an incoming color image from the RGB camera
     ///
-    /// \param event the event data structure procviding access to the image data
+    /// \param event    the event data structure procviding access to the image data
     void HandleColorEvent(const ColorImageEvent& event);
 
     /// Event handler for an incoming depth image from the depth camera
     ///
-    /// \param event the event data structure procviding access to the image data
+    /// \param event    the event data structure procviding access to the image data
     void HandleDepthEvent(const DepthImageEvent& event);
+
+    /// Event handler for updates to keyframe poses from the backend
+    ///
+    /// \param event    the event data structure describing the pose change
+    void HandleKeyframePoseEvent(const KeyframePoseEvent& event);
 
     EventListenerList<InitializedEvent> initialization;
     EventListenerList<TrackingEvent> tracking;
@@ -257,6 +277,12 @@ private:
 
     // current motion "velocity"
     Sophus::SE3d::Tangent relative_motion_twist_;
+
+    // the history of recent poses
+    PoseQueue history_;
+
+    // updates from the frontend
+    PoseQueue updates_;
 
     Camera rgb_camera_;
     StereoDepthCamera depth_camera_;

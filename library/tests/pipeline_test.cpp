@@ -66,7 +66,7 @@ TEST(PipelineTest, RunPipeline) {
 
     Vocabulary vocabulary;
 
-    RgbdFrontend::Parameters frontend_parameters;
+    FrontendParameters frontend_parameters;
     Backend::Parameters backend_parameters;
 
     Pipeline pipeline(frontend_parameters, backend_parameters,

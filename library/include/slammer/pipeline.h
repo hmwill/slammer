@@ -46,7 +46,7 @@ namespace slammer {
 
 class Pipeline {
 public:
-    Pipeline(const RgbdFrontend::Parameters& frontend_parameters,
+    Pipeline(const FrontendParameters& frontend_parameters,
              const Backend::Parameters& backend_parameters,
              Vocabulary&& vocabulary, Camera&& rgb_camera, StereoDepthCamera&& depth_camera,
              EventListenerList<ColorImageEvent>& color_source,
@@ -62,7 +62,7 @@ private:
 
     Map map_;
 
-    RgbdFrontend frontend_;
+    Frontend frontend_;
     KeyframeIndex keyframe_index_;
     Backend backend_;
 };

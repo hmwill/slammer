@@ -34,7 +34,7 @@
 using namespace slammer;
 
 
-Pipeline::Pipeline(const RgbdFrontend::Parameters& frontend_parameters,
+Pipeline::Pipeline(const FrontendParameters& frontend_parameters,
                    const Backend::Parameters& backend_parameters,
                    Vocabulary&& vocabulary, 
                    Camera&& rgb_camera, StereoDepthCamera&& depth_camera,
@@ -48,9 +48,9 @@ Pipeline::Pipeline(const RgbdFrontend::Parameters& frontend_parameters,
 {
     using namespace std::placeholders;
     
-    frontend_.keyframes.AddHandler(std::bind(&Backend::HandleRgbdFrameEvent, &backend_, _1));
-    backend_.keyframe_poses.AddHandler(std::bind(&RgbdFrontend::HandleKeyframePoseEvent, &frontend_, _1));
+    frontend_.keyframes.AddHandler(std::bind(&Backend::HandleKeyframeEvent, &backend_, _1));
+    backend_.keyframe_poses.AddHandler(std::bind(&Frontend::HandleKeyframePoseEvent, &frontend_, _1));
     
-    color_source.AddHandler(std::bind(&RgbdFrontend::HandleColorEvent, &frontend_, _1));
-    depth_source.AddHandler(std::bind(&RgbdFrontend::HandleDepthEvent, &frontend_, _1));
+    color_source.AddHandler(std::bind(&Frontend::HandleColorEvent, &frontend_, _1));
+    depth_source.AddHandler(std::bind(&Frontend::HandleDepthEvent, &frontend_, _1));
 }

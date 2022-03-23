@@ -1,6 +1,6 @@
 add_library(slammer_lib 
   src/slammer.cpp src/events.cpp src/camera.cpp
-  #src/backend.cpp src/pipeline.cpp
+  src/backend.cpp src/pipeline.cpp
   src/frontend.cpp src/map.cpp 
   src/descriptor.cpp
   src/flow.cpp
@@ -28,7 +28,7 @@ target_link_libraries(slammer_lib
 
 add_executable(test_slammer_lib 
   tests/slammer_test.cpp tests/events_test.cpp
-  #tests/backend_test.cpp tests/pipeline_test.cpp
+  tests/backend_test.cpp tests/pipeline_test.cpp
   tests/frontend_test.cpp tests/map_test.cpp 
   tests/descriptor_test.cpp
   tests/flow_test.cpp

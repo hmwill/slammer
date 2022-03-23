@@ -30,6 +30,7 @@
 
 #include "slammer/frontend.h"
 
+#include "slammer/backend.h"
 #include "slammer/events.h"
 #include "slammer/flow.h"
 #include "slammer/pnp.h"
@@ -98,7 +99,7 @@ void MaskNaN(const std::vector<Point3d>& points, std::vector<uchar>& mask) {
 
 } // namespace 
 
-void AbsoluteTracker::HandleColorEvent(const ColorImageEvent& event) {
+void Frontend::HandleColorEvent(const ColorImageEvent& event) {
     current_state_.color_image = event.image;
 
     if (parameters_.trigger == Trigger::kTriggerColor) {
@@ -106,7 +107,7 @@ void AbsoluteTracker::HandleColorEvent(const ColorImageEvent& event) {
     }
 }
 
-void AbsoluteTracker::HandleDepthEvent(const DepthImageEvent& event) {
+void Frontend::HandleDepthEvent(const DepthImageEvent& event) {
     current_state_.depth_image = event.image;
 
     if (parameters_.trigger == Trigger::kTriggerDepth) {
@@ -114,7 +115,7 @@ void AbsoluteTracker::HandleDepthEvent(const DepthImageEvent& event) {
     }
 }
 
-void AbsoluteTracker::ProcessCurrentImages(Timestamp timestamp) {
+void Frontend::ProcessCurrentImages(Timestamp timestamp) {
     // TODO: Later, we could actually learn if color or depth should be used as trigger,
     // or possibly use some form of interpolation
 
@@ -147,7 +148,7 @@ void AbsoluteTracker::ProcessCurrentImages(Timestamp timestamp) {
     }
 }
 
-void AbsoluteTracker::DidInitialize() {
+void Frontend::DidInitialize() {
     if (initialization.has_listeners()) {
         InitializedEvent event {
             reference_state_.timestamp,
@@ -161,7 +162,7 @@ void AbsoluteTracker::DidInitialize() {
     }
 }
 
-bool AbsoluteTracker::ReferenceFromCurrent() {
+bool Frontend::ReferenceFromCurrent() {
     std::vector<orb::KeyPoint> key_points;
     Descriptors descriptors;
 
@@ -201,7 +202,7 @@ bool AbsoluteTracker::ReferenceFromCurrent() {
     }
 }
 
-void AbsoluteTracker::DoInitialize(Timestamp timestamp) {
+void Frontend::DoInitialize(Timestamp timestamp) {
     // keep track of time
     current_state_.timestamp = timestamp;
 
@@ -219,7 +220,7 @@ void AbsoluteTracker::DoInitialize(Timestamp timestamp) {
     }
 }
 
-void AbsoluteTracker::DidTrack() {
+void Frontend::DidTrack() {
     if (tracking.has_listeners()) {
         TrackingEvent event {
             current_state_.timestamp,
@@ -234,7 +235,7 @@ void AbsoluteTracker::DidTrack() {
     }
 }
 
-void AbsoluteTracker::LostTracking() {
+void Frontend::LostTracking() {
     if (tracking_lost.has_listeners()) {
         TrackingLostEvent event {
             current_state_.timestamp,
@@ -244,7 +245,7 @@ void AbsoluteTracker::LostTracking() {
     }
 }
 
-void AbsoluteTracker::DoTracking(Timestamp timestamp) {
+void Frontend::DoTracking(Timestamp timestamp) {
     std::vector<float> error;
 
     // TODO: Refactor this such that the same conversion can be used for feature detection
@@ -352,17 +353,19 @@ void AbsoluteTracker::DoTracking(Timestamp timestamp) {
     }
 }
 
-void AbsoluteTracker::DoRecover(Timestamp timestamp) {
+void Frontend::DoRecover(Timestamp timestamp) {
 
 }
 
-void AbsoluteTracker::PostKeyframe(const TrackerState& state, const Descriptors& descriptors) {
+void Frontend::PostKeyframe(const TrackerState& state, const Descriptors& descriptors) {
+    history_.emplace_back(PoseRecord { state.pose, state.timestamp });
+
     if (keyframes.has_listeners()) {
         keyframes.HandleEvent(CreateKeyFrameEvent(state, descriptors));
     }
 }
 
-KeyframeEvent AbsoluteTracker::CreateKeyFrameEvent(const TrackerState& state, const Descriptors& descriptors) {
+KeyframeEvent Frontend::CreateKeyFrameEvent(const TrackerState& state, const Descriptors& descriptors) {
     return KeyframeEvent {
         state.timestamp,
         state.pose,
@@ -374,4 +377,9 @@ KeyframeEvent AbsoluteTracker::CreateKeyFrameEvent(const TrackerState& state, co
         rgb_camera_,
         depth_camera_
     };
+}
+
+void Frontend::HandleKeyframePoseEvent(const KeyframePoseEvent& event) {
+    // TODO: can we possibly exclude events based on timestamp information?
+    updates_.emplace_back(PoseRecord { event.keyframe->pose, event.keyframe->timestamp });
 }

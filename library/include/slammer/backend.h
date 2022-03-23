@@ -105,7 +105,7 @@ public:
     Backend& operator=(const Backend&) = delete;
 
     /// Handler function that is called by the frontend when a new frame is available
-    void HandleRgbdFrameEvent(const RgbdFrameEvent& frame);
+    void HandleKeyframeEvent(const KeyframeEvent& frame);
 
     /// Event listeners interested in keyframe pose updates
     EventListenerList<KeyframePoseEvent> keyframe_poses;
