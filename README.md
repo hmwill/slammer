@@ -1,6 +1,6 @@
 # slammer
 
-Personal learning excursion into Simultanuous Location and Mapping (SLAM) methods. What's currently there 
+Personal learning excursion into Simultaneous Location and Mapping (SLAM) methods. What's currently there 
 is in the tradition of the ORB-SLAM family of systems. However, as a learning exercise, I decided to 
 implement the algorithms from rather low above ground up. So, for example, there's my own implementation 
 of ORB feature detection, description and matching on top of the Boost Generic Image Library (GIL) as image 
