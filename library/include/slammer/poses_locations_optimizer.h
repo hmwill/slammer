@@ -54,12 +54,6 @@ namespace slammer {
 class PosesLocationsOptimizer {
 public:
     struct Parameters {
-        /// the numerical optimization algorithm to employ
-        enum Algorithm {
-            kGaussNewton,
-            kLevenbergMarquardt
-        } algorithm;
-
         /// maximum number of iterations
         unsigned max_iterations;
 
@@ -96,8 +90,8 @@ public:
 
         // create reverse lookup table for landmarks
         for (size_t index = 0; index < landmarks_.size(); ++index) {
-            assert(landmark_index_.find(landsmarks_[index]) == landmark_index_.end());
-            landmark_index_.insert({ landmarks_[index], index });
+            assert(landmark_id_index_.find(landsmarks_[index]) == landmark_id_index_.end());
+            landmark_id_index_.insert({ landmarks_[index]->id, index });
         }
 
         CalculateConstraints();
@@ -181,13 +175,25 @@ private:
 
     void CalculateConstraints();
 
+    /// Remap landmark indices
+    size_t RemapLandmarkIndex(size_t index) const {
+        auto landmark_id = landmarks_[index]->id;
+        auto mapping_iter = mapping_.find(landmark_id);
+
+        if (mapping_iter != mapping_.end()) {
+            index = landmark_id_index_.at(mapping_iter->second);
+        }
+
+        return index;
+    }
+
     StereoDepthCamera depth_camera_;
     Keyframes keyframes_;
     Landmarks landmarks_;
     LandmarkMapping mapping_;
 
     std::unordered_map<KeyframePointer, size_t> keyframe_index_;
-    std::unordered_map<LandmarkPointer, size_t> landmark_index_;
+    std::unordered_map<LandmarkId, size_t> landmark_id_index_;
 
     size_t total_dimension_;
     size_t total_constraints_;

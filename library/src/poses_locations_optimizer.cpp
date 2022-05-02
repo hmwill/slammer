@@ -58,6 +58,8 @@ Result<double> PosesLocationsOptimizer::Optimize(Poses& poses, Locations& locati
     Eigen::VectorXd value(total_dimension());
 
     // Initialize value vector
+    // TODO: Should we do something smart in the case of mapped landmarks?
+    // Such as initializing using the mean of the locations of the unified landmarks?
     if (inout) {
         for (size_t index = 0; index < poses.size(); ++index) {
             auto slot = PoseSlot(index);
@@ -84,13 +86,9 @@ Result<double> PosesLocationsOptimizer::Optimize(Poses& poses, Locations& locati
     using namespace std::placeholders;
 
     auto result = 
-        parameters.algorithm == Parameters::kLevenbergMarquardt ?
-            LevenbergMarquardt(std::bind(&PosesLocationsOptimizer::CalculateJacobian, *this, _1),
-                               std::bind(&PosesLocationsOptimizer::CalculateResidual, *this, _1),
-                               value, parameters.max_iterations, parameters.lambda) :
-            GaussNewton(std::bind(&PosesLocationsOptimizer::CalculateJacobian, *this, _1),
-                        std::bind(&PosesLocationsOptimizer::CalculateResidual, *this, _1),
-                        value, parameters.max_iterations);
+        LevenbergMarquardt(std::bind(&PosesLocationsOptimizer::CalculateJacobian, *this, _1),
+                            std::bind(&PosesLocationsOptimizer::CalculateResidual, *this, _1),
+                            value, parameters.max_iterations, parameters.lambda);
 
     // extract result
     for (size_t index = 0; index < poses.size(); ++index) {
@@ -98,8 +96,11 @@ Result<double> PosesLocationsOptimizer::Optimize(Poses& poses, Locations& locati
         poses[index] = SE3d::exp(value(slot));
     }
 
+    // for landmarks, reflect the provided mapping of landmarks when extracting result values
     for (size_t index = 0; index < locations.size(); ++index) {
-        auto slot = LocationSlot(index);
+        size_t slot_index = RemapLandmarkIndex(index);
+
+        auto slot = LocationSlot(slot_index);
         locations[index] = value(slot);
     }
 
@@ -114,8 +115,12 @@ Eigen::SparseMatrix<double> PosesLocationsOptimizer::CalculateJacobian(const Eig
     size_t num_constraints = 0;
 
     for (size_t index = 0; index < landmarks_.size(); ++index) {
+        // we use the landmark as is to identify constraints
         const Landmark& landmark = *landmarks_[index];
-        auto location_slot = LocationSlot(index);
+
+        // but we use the remapped coordinates for solving the equation
+        size_t location_index = RemapLandmarkIndex(index);
+        auto location_slot = LocationSlot(location_index);
 
         Vector3d coords(value(location_slot));
 
@@ -172,9 +177,12 @@ Eigen::SparseMatrix<double> PosesLocationsOptimizer::CalculateJacobian(const Eig
             auto landmark_pointer = feature->landmark.lock();
 
             // skip landmarks that we processed in the loop above
-            if (landmark_index_.find(landmark_pointer) != landmark_index_.end()) {
+            if (landmark_id_index_.find(landmark_pointer->id) != landmark_id_index_.end()) {
                 continue;
             }
+
+            // Constant landmarks cannot be subject to unification
+            assert(mapping_.find(landmark_pointer->id) == mapping_.end());
 
             // we are only dealing with constraints given by landmarks whose
             // position we consider as fixed
@@ -211,7 +219,10 @@ Eigen::VectorXd PosesLocationsOptimizer::CalculateResidual(const Eigen::VectorXd
 
     for (size_t index = 0; index < landmarks_.size(); ++index) {
         const Landmark& landmark = *landmarks_[index];
-        auto location_slot = LocationSlot(index);
+
+        // but we use the remapped coordinates for solving the equation
+        size_t location_index = RemapLandmarkIndex(index);
+        auto location_slot = LocationSlot(location_index);
 
         for (const auto& weak_feature: landmark.observations) {
             auto feature = weak_feature.lock();
@@ -249,9 +260,12 @@ Eigen::VectorXd PosesLocationsOptimizer::CalculateResidual(const Eigen::VectorXd
             auto landmark_pointer = feature->landmark.lock();
 
             // skip landmarks that we processed in the loop above
-            if (landmark_index_.find(landmark_pointer) != landmark_index_.end()) {
+            if (landmark_id_index_.find(landmark_pointer->id) != landmark_id_index_.end()) {
                 continue;
             }
+
+            // Constant landmarks cannot be subject to unification
+            assert(mapping_.find(landmark_pointer->id) == mapping_.end());
 
             // we are only dealing with constraints given by landmarks whose
             // position we consider as fixed
@@ -287,7 +301,7 @@ void PosesLocationsOptimizer::CalculateConstraints() {
             auto landmark_pointer = feature->landmark.lock();
 
             // skip landmarks that we processed in the loop above
-            if (landmark_index_.find(landmark_pointer) != landmark_index_.end()) {
+            if (landmark_id_index_.find(landmark_pointer->id) != landmark_id_index_.end()) {
                 continue;
             }
 
