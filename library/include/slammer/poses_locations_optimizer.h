@@ -74,27 +74,25 @@ public:
     /// \param keyframes    the keyframes included in the subgraph that are subject to optimization
     /// \param landmarks    the landmarks included in the subgraph that are subject to optimization
     /// \param mapping      assume the unification of landmarks based on this mapping    
-    template<class C, class K, class L, class M>
-    PosesLocationsOptimizer(C&& depth_camera, K&& keyframes, L&& landmarks, M&& mapping)
+    PosesLocationsOptimizer(const StereoDepthCamera& depth_camera, const Keyframes& keyframes, 
+                            const Landmarks& landmarks, const LandmarkMapping& mapping)
+        : depth_camera_(depth_camera), keyframes_(keyframes), landmarks_(landmarks), mapping_(mapping) {
+        Initialize();
+    }
+
+    /// Construct and instance of the pose graph optimization problem
+    ///
+    /// \param depth_camera the camera utilized to capture the keyframes, which determines the error function
+    /// \param keyframes    the keyframes included in the subgraph that are subject to optimization
+    /// \param landmarks    the landmarks included in the subgraph that are subject to optimization
+    /// \param mapping      assume the unification of landmarks based on this mapping    
+    PosesLocationsOptimizer(StereoDepthCamera&& depth_camera, Keyframes&& keyframes, 
+                            Landmarks&& landmarks, LandmarkMapping&& mapping)
         : depth_camera_(std::forward<StereoDepthCamera>(depth_camera)), 
           keyframes_(std::forward<Keyframes>(keyframes)), 
           landmarks_(std::forward<Landmarks>(landmarks)), 
           mapping_(std::forward<LandmarkMapping>(mapping)) {
-        total_dimension_ = keyframes_.size() * kDimPose + landmarks_.size() * kDimLocation;
-
-        // create reverse lookup table for keyframes
-        for (size_t index = 0; index < keyframes_.size(); ++index) {
-            assert(keyframe_index_.find(keyframes_[index]) == keyframe_index_.end());
-            keyframe_index_.insert({ keyframes_[index], index });
-        }
-
-        // create reverse lookup table for landmarks
-        for (size_t index = 0; index < landmarks_.size(); ++index) {
-            assert(landmark_id_index_.find(landsmarks_[index]) == landmark_id_index_.end());
-            landmark_id_index_.insert({ landmarks_[index]->id, index });
-        }
-
-        CalculateConstraints();
+        Initialize();
     }
 
     /// \param poses        (out) the new keyframe poses calculated as result of the optimization process
@@ -140,6 +138,24 @@ private:
         kDimConstraint = 3
     };
 
+    void Initialize() {
+        total_dimension_ = keyframes_.size() * kDimPose + landmarks_.size() * kDimLocation;
+
+        // create reverse lookup table for keyframes
+        for (size_t index = 0; index < keyframes_.size(); ++index) {
+            assert(keyframe_index_.find(keyframes_[index]) == keyframe_index_.end());
+            keyframe_index_.insert({ keyframes_[index], index });
+        }
+
+        // create reverse lookup table for landmarks
+        for (size_t index = 0; index < landmarks_.size(); ++index) {
+            assert(landmark_id_index_.find(landmarks_[index]->id) == landmark_id_index_.end());
+            landmark_id_index_.insert({ landmarks_[index]->id, index });
+        }
+
+        CalculateConstraints();
+    }
+    
     /// Return the offset associated with a given location identified by its index within the
     /// overall vector of variables to optimize
     ///

@@ -39,6 +39,23 @@
 
 namespace slammer {
 
+namespace sparse {
+
+template <typename Matrix, typename Iterator>
+void EmitTriplets(const Matrix& matrix, Iterator output, size_t row_offset, size_t column_offset) {
+    for (size_t row_index = 0; row_index < matrix.rows(); ++row_index) {
+        for (size_t column_index = 0; column_index < matrix.cols(); ++column_index) {
+            auto value = matrix(row_index, column_index);
+
+            if (value) {
+                *output++ = Eigen::Triplet<double>(row_offset + row_index, column_offset + column_index, value);
+            }
+        }
+    }
+}
+
+} // namespace sparse
+
 /// The signature of the function to compute the Jacobian that is passed to the least squares optimizer
 /// functions.
 typedef std::function<Eigen::SparseMatrix<double>(const Eigen::VectorXd& value)> Jacobian;

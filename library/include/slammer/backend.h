@@ -61,22 +61,25 @@ public:
         float max_match_distance = 12.0f;
 
         // minimum number of matches against previous frame to work locally
-        int min_feature_matches = 50;
+        unsigned min_feature_matches = 50;
 
         // minimum number of matches against candidate frame to attempt loop closure
-        int min_loop_feature_matches = 40;
+        unsigned min_loop_feature_matches = 40;
 
         // minimum number of inliers for a good feature-based match between frames
-        int min_inlier_matches = 25;
+        unsigned min_inlier_matches = 25;
 
         // upper limit on the number of keyframes included in local optimization
-        int max_keyframes_in_local_graph = 15;
+        unsigned max_keyframes_in_local_graph = 15;
 
         // number of solver iterations for local optimization
-        int local_optimization_iterations = 10;
+        unsigned local_optimization_iterations = 10;
+
+        // number of solver iterations for local optimization
+        double local_optimization_lambda = 0.01;
 
         // maximum number of search results when querying index for loop candidates
-        int max_loop_candidiates = 10;
+        unsigned max_loop_candidiates = 10;
 
         // maximum correction distance to allow for loop closure candidate
         double max_loop_correction_distance = M_2_PI / 60.0;
@@ -85,10 +88,10 @@ public:
         double max_loop_correction_angle = std::numeric_limits<double>::max(); 
 
         // ICP iteration limit
-        size_t max_iterations = 30;
+        unsigned max_iterations = 30;
         
         // ICP sample size
-        size_t sample_size = 10;
+        unsigned sample_size = 10;
         
         /// ICP outlier factor
         double outlier_factor = 7.16;        
@@ -97,7 +100,7 @@ public:
         int seed = 12345;
     };
 
-    Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map,
+    Backend(const Parameters& parameters, const Camera& rgb_camera, const StereoDepthCamera& depth_camera, Map& map,
             KeyframeIndex& keyframe_index);
 
     // Disallow copy construction and copy assignment
@@ -205,13 +208,13 @@ private:
 
 private:
     /// Configuration parameters
-    Parameters parameters_;
+    const Parameters parameters_;
 
     /// Parameters describing the RGB camera
     const Camera& rgb_camera_;
 
     /// Parameters describing the depth camera
-    const Camera& depth_camera_;
+    const StereoDepthCamera& depth_camera_;
     
     /// The sparse map we are populating
     Map& map_;

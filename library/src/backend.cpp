@@ -34,6 +34,8 @@
 #include "slammer/math.h"
 #include "slammer/pnp.h"
 
+#include "slammer/poses_locations_optimizer.h"
+
 #include "g2o/types/slam3d/types_slam3d.h"
 #include "g2o/core/sparse_optimizer.h"
 #include "g2o/core/block_solver.h"
@@ -68,8 +70,8 @@ inline g2o::Isometry3 IsometryFromSE3d(const SE3d& se3d) {
 
 } // namespace
 
-Backend::Backend(const Parameters& parameters, const Camera& rgb_camera, const Camera& depth_camera, Map& map, 
-                 KeyframeIndex& keyframe_index)
+Backend::Backend(const Parameters& parameters, const Camera& rgb_camera, const StereoDepthCamera& depth_camera, 
+                 Map& map, KeyframeIndex& keyframe_index)
     : parameters_(parameters), rgb_camera_(rgb_camera), depth_camera_(depth_camera),
         map_(map), keyframe_index_(keyframe_index) {}
 
@@ -464,125 +466,16 @@ void Backend::OptimizePosesAndLocations(const Keyframes& keyframes, const Landma
     assert(!inout || poses.size() == keyframes.size());
     assert(!inout || locations.size() == landmarks.size());
 
-    g2o::SparseOptimizer optimizer;
 
-    typedef g2o::BlockSolver_6_3 BlockSolverType;
-    //typedef g2o::LinearSolverCholmod<BlockSolverType::PoseMatrixType> LinearSolverType;
-    typedef g2o::LinearSolverEigen<BlockSolverType::PoseMatrixType> LinearSolverType;
+    PosesLocationsOptimizer optimizer(depth_camera_, keyframes, landmarks, mapping);
+    PosesLocationsOptimizer::Parameters parameters {
+        this->parameters_.local_optimization_iterations,
+        this->parameters_.local_optimization_lambda
+    };
 
-    auto algorithm = new g2o::OptimizationAlgorithmLevenberg(
-        g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
+    Result<double> result = optimizer.Optimize(poses, locations, inout, parameters);
 
-    optimizer.setAlgorithm(algorithm);
-    optimizer.setVerbose(false);
-
-    absl::btree_map<Timestamp, size_t> keyframe_indices;
-    absl::btree_map<LandmarkId, size_t> landmark_indices;
-
-    for (size_t index = 0; index < keyframes.size(); ++index) {
-        const auto& keyframe = keyframes[index];
-
-        keyframe_indices[keyframe->timestamp] = index;
-
-        auto vertex = new g2o::VertexSE3();
-        vertex->setId(index);
-        vertex->setEstimate(IsometryFromSE3d(inout ? poses[index] : keyframe->pose));
-        vertex->setFixed(keyframe->pinned);
-        optimizer.addVertex(vertex);
-    }
-
-    auto landmark_vertex_offset = keyframes.size();
-
-    for (size_t index = 0; index < landmarks.size(); ++index) {
-        const auto& landmark = landmarks[index];
-
-        landmark_indices[landmark->id] = index;
-
-        auto vertex = new g2o::VertexPointXYZ();
-        vertex->setMarginalized(true);
-        vertex->setId(landmark_vertex_offset + index);
-        vertex->setEstimate(landmark->location);
-        optimizer.addVertex(vertex);
-    }
-
-    auto camera_parameters = new g2o::ParameterCamera();
-    camera_parameters->setId(0);
-    camera_parameters->setKcam(rgb_camera_.fx(), rgb_camera_.fy(), rgb_camera_.cx(), rgb_camera_.cy());
-    optimizer.addParameter(camera_parameters);
-
-    for (size_t keyframe_index = 0; keyframe_index < keyframes.size(); ++keyframe_index) {
-        const auto& keyframe = keyframes[keyframe_index];
-
-        for (const auto& feature: keyframe->features) {
-            if (auto landmark = feature->landmark.lock()) {
-                auto landmark_id = landmark->id;
-
-                // potentially the landmark has been remapped.
-                auto mapping_iter = mapping.find(landmark_id);
-
-                if (mapping_iter != mapping.end()) {
-                    landmark_id = mapping_iter->second;
-                }
-
-                auto landmark_iter = landmark_indices.find(landmark_id);
-
-                // Skip landmarks that don't contribute to the sub graph at hand
-                if (landmark_iter == landmark_indices.end()) {
-                    // should only happen for keyframes that anchor the optimization problem
-                    assert(keyframe->pinned);
-                    continue;
-                }
-
-                auto landmark_index = landmark_iter->second;
-
-                auto edge = new g2o::EdgeSE3PointXYZDepth();
-                edge->setVertex( 0, optimizer.vertex(keyframe_index));
-                edge->setVertex( 1, optimizer.vertex(landmark_index + landmark_vertex_offset));
-                // TODO: At some point, we need to use robot coordinates instead of camera coordinates
-                edge->setMeasurement(inout ? locations[landmark_index] : feature->coords);
-
-                // TODO: Apply error model for depth measurement
-                edge->setInformation(Eigen::Matrix3d::Identity());
-
-                // What is this?
-                edge->setParameterId(0, 0);
-                edge->setRobustKernel(new g2o::RobustKernelHuber());
-                optimizer.addEdge(edge);
-            }
-        }
-    }
-
-    // Perform the actual optimization
-    optimizer.setVerbose(true); // while debugging
-    optimizer.initializeOptimization();
-    optimizer.optimize(parameters_.local_optimization_iterations);
-
-    // retrieve results
-    poses.clear();
-
-    for (size_t index = 0; index < keyframes.size(); ++index) {
-        auto vertex = dynamic_cast<g2o::VertexSE3 *>(optimizer.vertex(index));
-        auto isometry = vertex->estimate();
-        auto rotation = isometry.rotation();
-        auto translation = isometry.translation();
-        SE3d pose(rotation, translation);
-        poses.push_back(pose);
-    }
-
-    locations.clear();
-
-    for (size_t index = 0; index < landmarks.size(); ++index) {
-        auto vertex = dynamic_cast<g2o::VertexPointXYZ *>(optimizer.vertex(index + landmark_vertex_offset));
-        locations.push_back(vertex->estimate());
-
-        // TODO: What criteria should we apply to mark bad features? 
-        double error = 0.0;
-        for (auto edge: vertex->edges()) {
-            auto se3_point_xyz_depth = dynamic_cast<g2o::EdgeSE3PointXYZDepth*>(edge);
-            se3_point_xyz_depth->computeError();
-            auto chi2 = se3_point_xyz_depth->chi2();
-        }
-    }
+    // TODO: Are we doing anything with the result value?
 }
 
 void Backend::UpdatePosesAndLocations(const Keyframes& keyframes, const Landmarks& landmarks,

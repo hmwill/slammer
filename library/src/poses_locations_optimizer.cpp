@@ -34,24 +34,10 @@
 
 using namespace slammer;
 
-namespace {
+using sparse::EmitTriplets;
 
-template <typename Matrix, typename Iterator>
-void EmitTriplets(const Matrix& matrix, Iterator output, size_t row_offset, size_t column_offset) {
-    for (size_t row_index = 0; row_index < matrix.rows(); ++row_index) {
-        for (size_t column_index = 0; column_index < matrix.cols(); ++column_index) {
-            auto value = matrix(row_index, column_index);
-
-            if (value) {
-                *output++ = Eigen::Triplet<double>(row_offset + row_index, column_offset + column_index, value);
-            }
-        }
-    }
-}
-
-} // namespace
-
-Result<double> PosesLocationsOptimizer::Optimize(Poses& poses, Locations& locations, bool inout, const Parameters& parameters) {
+Result<double> PosesLocationsOptimizer::Optimize(Poses& poses, Locations& locations, bool inout, 
+                                                 const Parameters& parameters) {
     assert(poses.size() == keyframes_.size());
     assert(locations.size() == landmarks_.size());
 
