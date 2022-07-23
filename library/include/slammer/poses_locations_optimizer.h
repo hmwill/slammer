@@ -104,7 +104,18 @@ public:
     /// \returns            an overall residual value in case the optimization process was successful
     Result<double> Optimize(Poses& poses, Locations& locations, bool inout, const Parameters& parameters);
 
-protected:
+private:
+    enum {
+        /// locations are 3-dimensional
+        kDimLocation = 3,
+
+        /// dimensionality of a pose (6)
+        kDimPose = SE3d::DoF,
+
+        /// dimensionality of a constraint
+        kDimConstraint = 3
+    };
+
     /// Calculate the Jacobian of the problem instance
     /// The rows of the Jacobian correspond to the measurement values associated with the 
     /// point pairs.
@@ -125,18 +136,6 @@ protected:
     Eigen::SparseMatrix<double> CalculateJacobian(const Eigen::VectorXd& value) const;
 
     Eigen::VectorXd CalculateResidual(const Eigen::VectorXd& value) const;
-
-private:
-    enum {
-        /// locations are 3-dimensional
-        kDimLocation = 3,
-
-        /// dimensionality of a pose (6)
-        kDimPose = SE3d::DoF,
-
-        /// dimensionality of a constraint
-        kDimConstraint = 3
-    };
 
     void Initialize() {
         total_dimension_ = keyframes_.size() * kDimPose + landmarks_.size() * kDimLocation;

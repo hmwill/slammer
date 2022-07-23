@@ -40,6 +40,11 @@
 
 namespace slammer {
 
+/// Optimize poses against a circular set of constraints as result of loop closure.
+///
+/// The algorithm is based on the optimization problem formulation in
+/// Aloise, Irvin, and Giorgio Grisetti. 2018. “Matrix Difference in Pose-Graph Optimization.” 
+/// arXiv [cs.RO]. arXiv. http://arxiv.org/abs/1809.00952.
 class LoopPoseOptimizer {
 public:
     struct Parameters {
@@ -79,6 +84,14 @@ public:
     Result<double> Optimize(Poses& poses, bool inout, SE3d relative_motion, const Parameters& parameters);
 
 private:
+    enum {
+        /// dimensionality of a pose (6)
+        kDimPose = 6,
+
+        /// dimensionality of a constraint
+        kDimConstraint = 12,
+    };
+
     void Initialize();
 
     /// Calculate the Jacobian of the problem instance
@@ -86,32 +99,28 @@ private:
     /// The rows of the Jacobian correspond to the relative transformations of consecutive
     /// keyframes.
     ///
-    /// That is, the rows are blocks of six rows each, in the order of the provided keyframes. The six rows correspond
-    /// to the 6 dimensions of the logarithm of T_ij^-1 * T_j * T_i^-1, where j = (i + 1) mod N, N the number of
+    /// That is, the rows are blocks of 12 rows each, in the order of the provided keyframes. The 12 rows correspond
+    /// to the 12 dimensions of the top 3 rows of T_ij^-1 * T_j * T_i^-1, where j = (i + 1) mod N, N the number of
     /// keyframes.
     ///
     /// The columns correspond to the vector variables that we are optimizing: For each keyframe, we have 6 coordinates
-    /// corresponding via exponential map to the pose in SE(3) associated with the second camera. Per documentation of
-    /// ``Sophus::SE3::exp()``, the first three components of those coordinates represent the translational part
-    /// ``upsilon`` in the tangent space of SE(3), while the last three components of ``a`` represents the rotation
-    /// vector ``omega``.
-    Eigen::SparseMatrix<double> CalculateJacobian(const SE3d& relative_motion, const Eigen::VectorXd& value) const;
+    /// corresponding to a 3-dimensional translation and angles around 3 axes of rotation.
+    Eigen::SparseMatrix<double> CalculateJacobian(const Poses& poses, const SE3d& relative_motion, const Eigen::VectorXd& value) const;
 
-    Eigen::VectorXd CalculateResidual(const SE3d& relative_motion, const Eigen::VectorXd& value) const;
+    Eigen::VectorXd CalculateResidual(const Poses& poses, const SE3d& measured_motion, const Eigen::VectorXd& value) const;
 
     inline void 
-    LoopPoseOptimizer::CalculateResidual0(Eigen::VectorXd& residual, const SE3d& relative_motion, 
+    LoopPoseOptimizer::CalculateResidual0(const Poses& poses, Eigen::VectorXd& residual, const SE3d& relative_motion, 
                                           const Eigen::VectorXd& value, size_t from_index, size_t to_index, 
                                           size_t residual_index) const;
 
-    enum {
-        /// dimensionality of a pose (6)
-        kDimPose = SE3d::DoF,
+    /// Calculate an SE(3) element from the provided parameters
+    static SE3d TransformFromParameters(const Eigen::Vector<double, kDimPose>& params);
 
-        /// dimensionality of a constraint
-        kDimConstraint = SE3d::DoF
-    };
-
+    /// Calculate the Jacobian for the parameters of a relative motion
+    static Eigen::Matrix<double, kDimConstraint, kDimPose> 
+    CalculateJacobianComponent(const SE3d& after, const Eigen::Vector<double, kDimPose>& params, const SE3d& before);
+    
     /// Return the offset associated with a given keyframe pose identified by its index within the
     /// overall vector of variables to optimize
     ///
@@ -132,7 +141,7 @@ private:
 
 
     Keyframes keyframes_;
-    std::vector<SE3d> relative_motion_;
+    std::vector<SE3d> measured_motion_;
 };
 
 } // namespace slammer

@@ -6,9 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # The following define enables c-style math macros in C++; used by Sophus
 add_definitions(-D_USE_MATH_DEFINES)
 
+# Google Test
 enable_testing()
 find_package(GTest REQUIRED)
 include(Dart)
+
+# Doxygen
+find_package(Doxygen)
 
 find_package(absl CONFIG REQUIRED)
 include_directories(${absl_INCLUDE_DIRS})
@@ -46,3 +50,10 @@ include_directories(third-party/rapidcsv)
 
 add_subdirectory(library)
 add_subdirectory(tools)
+
+# Doxygen documentation
+doxygen_add_docs(
+    doxygen
+    ${PROJECT_SOURCE_DIR}
+    COMMENT "Generate man pages"
+)

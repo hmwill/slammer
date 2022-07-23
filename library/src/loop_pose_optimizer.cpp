@@ -39,41 +39,383 @@ using sparse::EmitTriplets;
 void LoopPoseOptimizer::Initialize() {
     for (size_t index = 0; index < keyframes_.size() - 1; ++index) {
         SE3d relative_motion = keyframes_[index + 1]->pose * keyframes_[index]->pose.inverse();
-        relative_motion_.push_back(relative_motion);
+        measured_motion_.push_back(relative_motion);
     }
 }
 
-Result<double> LoopPoseOptimizer::Optimize(Poses& poses, bool inout, SE3d relative_motion, 
-                                           const Parameters& parameters) {
+SE3d LoopPoseOptimizer::TransformFromParameters(const Eigen::Vector<double, kDimPose>& params) {
+    auto x     = params[0];
+    auto y     = params[1];
+    auto z     = params[2];
+    auto phi   = params[3];
+    auto psi   = params[4];
+    auto theta = params[5];
+
+    Eigen::Matrix4d T;
+
+    T(0, 0) = cos(psi) * cos(theta);
+    T(0, 1) = -cos(theta) * sin(psi);
+    T(0, 2) = sin(theta);
+    T(0, 3) = x;
+    T(1, 0) = cos(phi) * sin(psi) + cos(psi) * sin(phi) * sin(theta);
+    T(1, 1) = cos(phi) * cos(psi) - sin(phi) * sin(psi) * sin(theta);
+    T(1, 2) = -cos(theta) * sin(phi);
+    T(1, 3) = y;
+    T(2, 0) = sin(phi) * sin(psi) - cos(phi) * cos(psi) * sin(theta);
+    T(2, 1) = cos(psi) * sin(phi) + cos(phi) * sin(psi) * sin(theta);
+    T(2, 2) = cos(phi) * cos(theta);
+    T(2, 3) = z;
+    T(3, 3) = 1.0;
+
+    return SE3d(T);
+}
+
+Eigen::Matrix<double, LoopPoseOptimizer::kDimConstraint, LoopPoseOptimizer::kDimPose> 
+LoopPoseOptimizer::CalculateJacobianComponent(const SE3d& after, const Eigen::Vector<double, kDimPose>& params, 
+                                              const SE3d& before) {
+    Eigen::Matrix<double, kDimConstraint, kDimPose> J;
+    auto Ti = after.inverse().matrix3x4();
+    auto Tj = before.matrix3x4();
+
+    auto Ti1_1 = Ti(0, 0);
+    auto Ti1_2 = Ti(0, 1);
+    auto Ti1_3 = Ti(0, 2);
+    auto Ti1_4 = Ti(0, 3);
+    auto Ti2_1 = Ti(1, 0);
+    auto Ti2_2 = Ti(1, 1);
+    auto Ti2_3 = Ti(1, 2);
+    auto Ti2_4 = Ti(1, 3);
+    auto Ti3_1 = Ti(2, 0);
+    auto Ti3_2 = Ti(2, 1);
+    auto Ti3_3 = Ti(2, 2);
+    auto Ti3_4 = Ti(2, 3);
+
+    auto Tj1_1 = Tj(0, 0);
+    auto Tj1_2 = Tj(0, 1);
+    auto Tj1_3 = Tj(0, 2);
+    auto Tj1_4 = Tj(0, 3);
+    auto Tj2_1 = Tj(1, 0);
+    auto Tj2_2 = Tj(1, 1);
+    auto Tj2_3 = Tj(1, 2);
+    auto Tj2_4 = Tj(1, 3);
+    auto Tj3_1 = Tj(2, 0);
+    auto Tj3_2 = Tj(2, 1);
+    auto Tj3_3 = Tj(2, 2);
+    auto Tj3_4 = Tj(2, 3);
+
+    auto x     = params[0];
+    auto y     = params[1];
+    auto z     = params[2];
+    auto phi   = params[3];
+    auto psi   = params[4];
+    auto theta = params[5];
+
+    auto sin_phi = sin(phi);
+    auto cos_phi = cos(phi);
+    auto sin_psi = sin(psi);
+    auto cos_psi = cos(psi);
+    auto sin_theta = sin(theta);
+    auto cos_theta = cos(theta);
+
+    J(0, 0) = 
+        - Tj1_1 * (Ti2_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_1 * (Ti2_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_1 * (Ti2_1 * cos_phi * cos_theta + Ti3_1 * cos_theta * sin_phi);
+    J(0, 1) = 
+        - Tj2_1 * (Ti2_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + Ti1_1 * cos_psi * cos_theta) 
+        + Tj1_1 * (Ti2_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - Ti1_1 * cos_theta * sin_psi);
+    J(0, 2) = 
+          Tj2_1 * (Ti1_1 * sin_psi * sin_theta + Ti3_1 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_1 * cos_theta * sin_phi * sin_psi) + Tj3_1 * (Ti1_1 * cos_theta - 
+                   Ti3_1 * cos_phi * sin_theta + Ti2_1 * sin_phi * sin_theta) 
+        - Tj1_1 * (Ti1_1 * cos_psi * sin_theta + Ti3_1 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_1 * cos_psi * cos_theta * sin_phi);
+    J(1, 0) = 
+        - Tj1_2 * (Ti2_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_2 * (Ti2_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_2 * (Ti2_1 * cos_phi * cos_theta + Ti3_1 * cos_theta * sin_phi);
+    J(1, 1) = 
+        - Tj2_2 * (Ti2_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_1 * cos_psi * cos_theta) + 
+                   Tj1_2 * (Ti2_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_1 * cos_theta * sin_psi);
+    J(1, 2) = 
+          Tj2_2 * (Ti1_1 * sin_psi * sin_theta + Ti3_1 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_1 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_2 * (Ti1_1 * cos_theta - Ti3_1 * cos_phi * sin_theta + Ti2_1 * sin_phi * sin_theta) 
+        - Tj1_2 * (Ti1_1 * cos_psi * sin_theta + Ti3_1 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_1 * cos_psi * cos_theta * sin_phi);
+    J(2, 0) = 
+        - Tj1_3 * (Ti2_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_3 * (Ti2_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_3 * (Ti2_1 * cos_phi * cos_theta + Ti3_1 * cos_theta * sin_phi);
+    J(2, 1) = 
+        - Tj2_3 * (Ti2_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_1 * cos_psi * cos_theta) 
+        + Tj1_3 * (Ti2_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_1 * cos_theta * sin_psi);
+    J(2, 2) = 
+          Tj2_3 * (Ti1_1 * sin_psi * sin_theta + Ti3_1 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_1 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_3 * (Ti1_1 * cos_theta - Ti3_1 * cos_phi * sin_theta + Ti2_1 * sin_phi * sin_theta) 
+        - Tj1_3 * (Ti1_1 * cos_psi * sin_theta + Ti3_1 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_1 * cos_psi * cos_theta * sin_phi);
+    J(3, 0) = 
+        - Tj1_4 * (Ti2_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_4 * (Ti2_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_4 * (Ti2_1 * cos_phi * cos_theta + Ti3_1 * cos_theta * sin_phi);
+    J(3, 1) = 
+        - Tj2_4 * (Ti2_1 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_1 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_1 * cos_psi * cos_theta) 
+        + Tj1_4 * (Ti2_1 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_1 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_1 * cos_theta * sin_psi);
+    J(3, 2) = 
+          Tj2_4 * (Ti1_1 * sin_psi * sin_theta + Ti3_1 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_1 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_4 * (Ti1_1 * cos_theta - Ti3_1 * cos_phi * sin_theta + Ti2_1 * sin_phi * sin_theta) 
+        - Tj1_4 * (Ti1_1 * cos_psi * sin_theta + 
+                   Ti3_1 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_1 * cos_psi * cos_theta * sin_phi);
+    J(3, 3) = Ti1_1;
+    J(3, 4) = Ti2_1;
+    J(3, 5) = Ti3_1;
+    J(4, 0) = 
+        - Tj1_1 * (Ti2_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_1 * (Ti2_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_1 * (Ti2_2 * cos_phi * cos_theta + Ti3_2 * cos_theta * sin_phi);
+    J(4, 1) = 
+        - Tj2_1 * (Ti2_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_2 * cos_psi * cos_theta) 
+        + Tj1_1 * (Ti2_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_2 * cos_theta * sin_psi);
+    J(4, 2) = 
+          Tj2_1 * (Ti1_2 * sin_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_2 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_1 * (Ti1_2 * cos_theta - 
+                   Ti3_2 * cos_phi * sin_theta + 
+                   Ti2_2 * sin_phi * sin_theta) 
+        - Tj1_1 * (Ti1_2 * cos_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_2 * cos_psi * cos_theta * sin_phi);
+    J(5, 0) = 
+        - Tj1_2 * (Ti2_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_2 * (Ti2_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_2 * (Ti2_2 * cos_phi * cos_theta + Ti3_2 * cos_theta * sin_phi);
+    J(5, 1) = 
+        - Tj2_2 * (Ti2_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_2 * cos_psi * cos_theta) 
+        + Tj1_2 * (Ti2_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_2 * cos_theta * sin_psi);
+    J(5, 2) = 
+          Tj2_2 * (Ti1_2 * sin_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_2 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_2 * (Ti1_2 * cos_theta - 
+                   Ti3_2 * cos_phi * sin_theta + 
+                   Ti2_2 * sin_phi * sin_theta) 
+        - Tj1_2 * (Ti1_2 * cos_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_2 * cos_psi * cos_theta * sin_phi);
+    J(6, 0) = 
+        - Tj1_3 * (Ti2_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_3 * (Ti2_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_3 * (Ti2_2 * cos_phi * cos_theta + Ti3_2 * cos_theta * sin_phi);
+    J(6, 1) = 
+        - Tj2_3 * (Ti2_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_2 * cos_psi * cos_theta) 
+        + Tj1_3 * (Ti2_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_2 * cos_theta * sin_psi);
+    J(6, 2) = 
+          Tj2_3 * (Ti1_2 * sin_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_2 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_3 * (Ti1_2 * cos_theta - 
+                   Ti3_2 * cos_phi * sin_theta + 
+                   Ti2_2 * sin_phi * sin_theta) 
+        - Tj1_3 * (Ti1_2 * cos_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_2 * cos_psi * cos_theta * sin_phi);
+    J(7, 0) = 
+        - Tj1_4 * (Ti2_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_4 * (Ti2_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_4 * (Ti2_2 * cos_phi * cos_theta + Ti3_2 * cos_theta * sin_phi);
+    J(7, 1) = 
+        - Tj2_4 * (Ti2_2 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_2 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_2 * cos_psi * cos_theta) 
+        + Tj1_4 * (Ti2_2 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_2 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_2 * cos_theta * sin_psi);
+    J(7, 2) = 
+          Tj2_4 * (Ti1_2 * sin_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_2 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_4 * (Ti1_2 * cos_theta - 
+                   Ti3_2 * cos_phi * sin_theta + 
+                   Ti2_2 * sin_phi * sin_theta) 
+        - Tj1_4 * (Ti1_2 * cos_psi * sin_theta + 
+                   Ti3_2 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_2 * cos_psi * cos_theta * sin_phi);
+    J(7, 3) = Ti1_2;
+    J(7, 4) = Ti2_2;
+    J(7, 5) = Ti3_2;
+    J(8, 0) = 
+        - Tj1_1 * (Ti2_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_1 * (Ti2_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_1 * (Ti2_3 * cos_phi * cos_theta + 
+                   Ti3_3 * cos_theta * sin_phi);
+    J(8, 1) = 
+        - Tj2_1 * (Ti2_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_3 * cos_psi * cos_theta) 
+        + Tj1_1 * (Ti2_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_3 * cos_theta * sin_psi);
+    J(8, 2) = 
+          Tj2_1 * (Ti1_3 * sin_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_3 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_1 * (Ti1_3 * cos_theta - 
+                   Ti3_3 * cos_phi * sin_theta + 
+                   Ti2_3 * sin_phi * sin_theta) 
+        - Tj1_1 * (Ti1_3 * cos_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_3 * cos_psi * cos_theta * sin_phi);
+    J(9, 0) = 
+        - Tj1_2 * (Ti2_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_2 * (Ti2_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_2 * (Ti2_3 * cos_phi * cos_theta + Ti3_3 * cos_theta * sin_phi);
+    J(9, 1) = 
+        - Tj2_2 * (Ti2_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_3 * cos_psi * cos_theta) 
+        + Tj1_2 * (Ti2_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_3 * cos_theta * sin_psi);
+    J(9, 2) = 
+          Tj2_2 * (Ti1_3 * sin_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_3 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_2 * (Ti1_3 * cos_theta - 
+                   Ti3_3 * cos_phi * sin_theta + 
+                   Ti2_3 * sin_phi * sin_theta) 
+        - Tj1_2 * (Ti1_3 * cos_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_3 * cos_psi * cos_theta * sin_phi);
+    J(10, 0) = 
+        - Tj1_3 * (Ti2_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_3 * (Ti2_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_3 * (Ti2_3 * cos_phi * cos_theta + Ti3_3 * cos_theta * sin_phi);
+    J(10, 1) = 
+        - Tj2_3 * (Ti2_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_3 * cos_psi * cos_theta) 
+        + Tj1_3 * (Ti2_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_3 * cos_theta * sin_psi);
+    J(10, 2) = 
+          Tj2_3 * (Ti1_3 * sin_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_3 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_3 * (Ti1_3 * cos_theta - Ti3_3 * cos_phi * sin_theta + Ti2_3 * sin_phi * sin_theta) 
+        - Tj1_3 * (Ti1_3 * cos_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_3 * cos_psi * cos_theta * sin_phi);
+    J(11, 0) = 
+        - Tj1_4 * (Ti2_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta)) 
+        - Tj2_4 * (Ti2_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti3_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta)) 
+        - Tj3_4 * (Ti2_3 * cos_phi * cos_theta + Ti3_3 * cos_theta * sin_phi);
+    J(11, 1) = 
+        - Tj2_4 * (Ti2_3 * (cos_phi * sin_psi + cos_psi * sin_phi * sin_theta) + 
+                   Ti3_3 * (sin_phi * sin_psi - cos_phi * cos_psi * sin_theta) + 
+                   Ti1_3 * cos_psi * cos_theta) 
+        + Tj1_4 * (Ti2_3 * (cos_phi * cos_psi - sin_phi * sin_psi * sin_theta) + 
+                   Ti3_3 * (cos_psi * sin_phi + cos_phi * sin_psi * sin_theta) - 
+                   Ti1_3 * cos_theta * sin_psi);
+    J(11, 2) = 
+          Tj2_4 * (Ti1_3 * sin_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_theta * sin_psi - 
+                   Ti2_3 * cos_theta * sin_phi * sin_psi) 
+        + Tj3_4 * (Ti1_3 * cos_theta - 
+                   Ti3_3 * cos_phi * sin_theta + 
+                   Ti2_3 * sin_phi * sin_theta) 
+        - Tj1_4 * (Ti1_3 * cos_psi * sin_theta + 
+                   Ti3_3 * cos_phi * cos_psi * cos_theta - 
+                   Ti2_3 * cos_psi * cos_theta * sin_phi);
+    J(11, 3) = Ti1_3;
+    J(11, 4) = Ti2_3;
+    J(11, 5) = Ti3_3;
+
+    return J;
+}
+
+Result<double> LoopPoseOptimizer::Optimize(Poses &poses, bool inout, SE3d relative_motion,
+                                           const Parameters &parameters) {
     assert(poses.size() == keyframes_.size());
 
+    // initialize all correction values to 0
     Eigen::VectorXd value(total_dimension());
+    value.setZero();
 
-    // Initialize value vector
-    if (inout) {
+    // Initialize pose vector from keyframe poses in case inout isn't set
+    if (!inout) {
         for (size_t index = 0; index < poses.size(); ++index) {
-            auto slot = PoseSlot(index);
-            value(slot) = poses[index].log();
-        }
-    } else {
-        for (size_t index = 0; index < keyframes_.size(); ++index) {
-            auto slot = PoseSlot(index);
-            value(slot) = keyframes_[index]->pose.log();
+            poses[index] = keyframes_[index]->pose;
         }
     }
 
     // perform optimization
     using namespace std::placeholders;
 
-    auto result = 
-        LevenbergMarquardt(std::bind(&LoopPoseOptimizer::CalculateJacobian, *this, relative_motion, _1),
-                            std::bind(&LoopPoseOptimizer::CalculateResidual, *this, relative_motion, _1),
-                            value, parameters.max_iterations, parameters.lambda);
+    auto result =
+        LevenbergMarquardt(std::bind(&LoopPoseOptimizer::CalculateJacobian, *this, poses, relative_motion, _1),
+                           std::bind(&LoopPoseOptimizer::CalculateResidual, *this, poses, relative_motion, _1),
+                           value, parameters.max_iterations, parameters.lambda);
 
-    // extract result
+    // extract result: multiply each pose with the delta determined through the optimization process
     for (size_t index = 0; index < poses.size(); ++index) {
         auto slot = PoseSlot(index);
-        poses[index] = SE3d::exp(value(slot));
+        auto delta = TransformFromParameters(value(slot));
+        poses[index] = delta * poses[index];
     }
 
     return result;
@@ -83,8 +425,9 @@ Result<double> LoopPoseOptimizer::Optimize(Poses& poses, bool inout, SE3d relati
 // to the 6 dimensions of the logarithm of T_ij^-1 * T_j * T_i^-1, where j = (i + 1) mod N, N the number of
 // keyframes.
 
-Eigen::SparseMatrix<double> 
-LoopPoseOptimizer::CalculateJacobian(const SE3d& relative_motion, const Eigen::VectorXd& value) const {
+Eigen::SparseMatrix<double>
+LoopPoseOptimizer::CalculateJacobian(const Poses &poses, const SE3d &relative_motion,
+                                     const Eigen::VectorXd &value) const {
     using Triplet = Eigen::Triplet<double>;
     std::vector<Triplet> triplets;
     size_t num_constraints = 0;
@@ -93,26 +436,38 @@ LoopPoseOptimizer::CalculateJacobian(const SE3d& relative_motion, const Eigen::V
     for (size_t index = 0; index < keyframes_.size() - 1; ++index, num_constraints += kDimConstraint) {
         size_t from_index = index;
         size_t to_index = index + 1;
-        const auto& measured_motion = relative_motion_[index];
+        const auto &measured_motion = measured_motion_[index];
 
         auto from_slot = PoseSlot(from_index);
         auto to_slot = PoseSlot(to_index + 1);
         auto from_pose = SE3d::exp(value(from_slot));
         auto to_pose = SE3d::exp(value(to_slot));
-        auto counter_motion = to_pose.inverse() * measured_motion;
-        auto diff_motion = from_pose * counter_motion;
+        auto diff_motion = measured_motion.inverse() * (to_pose * from_pose.inverse());
+        auto residual = diff_motion.log();
 
+        // Calculate Jacobian for from node
+        auto J_from = CalculateJacobianComponent(poses[to_index].inverse(), value(from_slot), poses[from_index]);
+        EmitTriplets(J_from, std::back_insert_iterator(triplets), index * kDimConstraint, from_index * kDimPose);
 
-
-        // Eigen::Matrix<double, 3, 6> jacobian_log;
-        // jacobian_log(Eigen::seqN(0, 3), Eigen::seqN(0, 3)) = Matrix3d::Identity();
-        // jacobian_log(Eigen::seqN(0, 3), Eigen::seqN(3, 3)) = -SE3d::SO3Member::hat(transformed);
-        // Eigen::Matrix<double, 3, 6> jacobian_params = jacobian_project * jacobian_second_params;
+        // Calculate Jacobian for to node
+        auto J_to = -CalculateJacobianComponent(poses[from_index].inverse(), value(to_slot), poses[to_index]);
+        EmitTriplets(J_to, std::back_insert_iterator(triplets), index * kDimConstraint, to_index * kDimPose);
     }
 
     // generate closing constraint from last keyframe to first
+    size_t last_pose_index = keyframes_.size() - 1;
+    auto from_slot = PoseSlot(last_pose_index);
+    auto to_slot = PoseSlot(0);
 
+    // Calculate Jacobian for from node
+    auto J_from = CalculateJacobianComponent(poses[0].inverse(), value(from_slot), poses[last_pose_index]);
+    EmitTriplets(J_from, std::back_insert_iterator(triplets), num_constraints, last_pose_index * kDimPose);
 
+    // Calculate Jacobian for to node
+    auto J_to = -CalculateJacobianComponent(poses[last_pose_index].inverse(), value(to_slot), poses[0]);
+    EmitTriplets(J_to, std::back_insert_iterator(triplets), num_constraints, 0);
+
+    // Wrap up matrix generation
     num_constraints += kDimConstraint;
     assert(num_constraints == total_constraints());
 
@@ -121,34 +476,36 @@ LoopPoseOptimizer::CalculateJacobian(const SE3d& relative_motion, const Eigen::V
     return result;
 }
 
-void LoopPoseOptimizer::CalculateResidual0(Eigen::VectorXd& residual, const SE3d& relative_motion, const Eigen::VectorXd& value,
-    size_t from_index, size_t to_index, size_t residual_index) const {
+void LoopPoseOptimizer::CalculateResidual0(const Poses &poses, Eigen::VectorXd &residual, const SE3d &measured_motion,
+                                           const Eigen::VectorXd &value, size_t from_index, size_t to_index,
+                                           size_t residual_index) const {
     auto residual_slot = Eigen::seqN(residual_index * kDimConstraint, int(kDimConstraint));
     auto from_slot = PoseSlot(from_index);
     auto to_slot = PoseSlot(to_index + 1);
-    auto from_pose = SE3d::exp(value(from_slot));
-    auto to_pose = SE3d::exp(value(to_slot));
-    auto diff_motion = from_pose * to_pose.inverse() * relative_motion;
-    residual(residual_slot) = diff_motion.log();
+    auto from_pose = TransformFromParameters(value(from_slot)) * poses[from_index];
+    auto to_pose = TransformFromParameters(value(to_slot)) * poses[to_index];
+    auto diff_motion = measured_motion.inverse() * (to_pose * from_pose.inverse());
+    residual(residual_slot) = diff_motion.matrix3x4().reshaped<Eigen::RowMajor>();
 }
 
 // The residual is comprised of blocks of six row each, in order of the provided keyframes. The six rows correspond
 // to the 6 dimensions of the logarithm of T_ij^-1 * T_j * T_i^-1, where j = (i + 1) mod N, N the number of
 // keyframes.
-Eigen::VectorXd 
-LoopPoseOptimizer::CalculateResidual(const SE3d& relative_motion, const Eigen::VectorXd& value) const {
+Eigen::VectorXd
+LoopPoseOptimizer::CalculateResidual(const Poses &poses, const SE3d &relative_motion, 
+                                     const Eigen::VectorXd &value) const {
     Eigen::VectorXd residual(total_constraints());
-  
+
     size_t residual_index = 0;
 
     // determine the residual for subsequent pairs of keyframes along the linear sequence
     for (size_t index = 0; index < keyframes_.size() - 1; ++index) {
-        CalculateResidual0(residual, relative_motion_[index], value, index, index + 1, index);
+        CalculateResidual0(poses, residual, measured_motion_[index], value, index, index + 1, index);
     }
 
     // determine the residual for the new constraint between last and first keyframe that we are adding in order
     // to close the loop
-    CalculateResidual0(residual, relative_motion, value, keyframes_.size() - 1, 0, keyframes_.size() - 1);
+    CalculateResidual0(poses, residual, relative_motion, value, keyframes_.size() - 1, 0, keyframes_.size() - 1);
 
     return residual;
 }
