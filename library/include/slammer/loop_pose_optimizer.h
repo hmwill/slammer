@@ -88,7 +88,7 @@ private:
         /// dimensionality of a pose (6)
         kDimPose = 6,
 
-        /// dimensionality of a constraint
+        /// dimensionality of a constraint, which is the 12 entries of the first 3 rows of the transformation matrix
         kDimConstraint = 12,
     };
 
@@ -96,8 +96,7 @@ private:
 
     /// Calculate the Jacobian of the problem instance
     ///
-    /// The rows of the Jacobian correspond to the relative transformations of consecutive
-    /// keyframes.
+    /// The rows of the Jacobian correspond to the relative transformations of consecutive keyframes.
     ///
     /// That is, the rows are blocks of 12 rows each, in the order of the provided keyframes. The 12 rows correspond
     /// to the 12 dimensions of the top 3 rows of T_ij^-1 * T_j * T_i^-1, where j = (i + 1) mod N, N the number of
@@ -105,9 +104,11 @@ private:
     ///
     /// The columns correspond to the vector variables that we are optimizing: For each keyframe, we have 6 coordinates
     /// corresponding to a 3-dimensional translation and angles around 3 axes of rotation.
-    Eigen::SparseMatrix<double> CalculateJacobian(const Poses& poses, const SE3d& relative_motion, const Eigen::VectorXd& value) const;
+    Eigen::SparseMatrix<double> CalculateJacobian(const Poses& poses, const SE3d& relative_motion, 
+                                                  const Eigen::VectorXd& value) const;
 
-    Eigen::VectorXd CalculateResidual(const Poses& poses, const SE3d& measured_motion, const Eigen::VectorXd& value) const;
+    Eigen::VectorXd CalculateResidual(const Poses& poses, const SE3d& measured_motion, 
+                                      const Eigen::VectorXd& value) const;
 
     inline void 
     LoopPoseOptimizer::CalculateResidual0(const Poses& poses, Eigen::VectorXd& residual, const SE3d& relative_motion, 
@@ -138,7 +139,6 @@ private:
 
     /// Return the overall number of constraints of the optimization problem
     inline size_t total_constraints() const { return keyframes_.size() * kDimConstraint; }
-
 
     Keyframes keyframes_;
     std::vector<SE3d> measured_motion_;

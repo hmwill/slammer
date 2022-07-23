@@ -421,10 +421,6 @@ Result<double> LoopPoseOptimizer::Optimize(Poses &poses, bool inout, SE3d relati
     return result;
 }
 
-// The rows of the Jacobian are blocks of six rows each, in the order of the provided keyframes. The six rows correspond
-// to the 6 dimensions of the logarithm of T_ij^-1 * T_j * T_i^-1, where j = (i + 1) mod N, N the number of
-// keyframes.
-
 Eigen::SparseMatrix<double>
 LoopPoseOptimizer::CalculateJacobian(const Poses &poses, const SE3d &relative_motion,
                                      const Eigen::VectorXd &value) const {
@@ -432,7 +428,6 @@ LoopPoseOptimizer::CalculateJacobian(const Poses &poses, const SE3d &relative_mo
     std::vector<Triplet> triplets;
     size_t num_constraints = 0;
 
-    // TODO: Generate matrix
     for (size_t index = 0; index < keyframes_.size() - 1; ++index, num_constraints += kDimConstraint) {
         size_t from_index = index;
         size_t to_index = index + 1;
