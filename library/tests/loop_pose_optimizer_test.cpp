@@ -33,66 +33,49 @@
 #include <gtest/gtest.h>
 
 #include "slammer/loop_pose_optimizer.h"
+#include "slammer/keyframe_index.h"
 
 using namespace slammer;
 
-namespace {
+TEST(LoopPoseOptimizer, Circle) {
+    // 1. Generate poses from noon to 9 hours along a circle
+    LoopPoseOptimizer::Keyframes keyframes;
 
-/// Generate a random transformation on SE(3)
-///
-/// The rotation will be chosen to be uniform, the translation will be normally distributed with
-/// variance sigma^2.
-SE3d GenerateRandomTransformation(double sigma = 1.0) {
-    static std::random_device rd;
+    const double kTwoPi = M_PI * 2.0;
+    const double kScale = 10.0;
 
-    std::uniform_real_distribution<> dis(-M_PI, M_PI);
-    Vector3d axis = Eigen::Vector3d::Random().normalized();
-    double angle = dis(rd);
-    Quaterniond rotation(Eigen::AngleAxisd(angle, axis));
+    for (size_t index = 0; index <= 9; ++index) {
+        auto angle = index / 12.0 * kTwoPi;
 
-    std::normal_distribution<> norm(0.0, sigma);
-    Vector3d translation;
-    translation[0] = norm(rd);
-    translation[1] = norm(rd);
-    translation[2] = norm(rd);
+        double x = sin(angle) * kScale;
+        double y = cos(angle) * kScale;
+        double z = 0;
 
-    SE3d result = SE3d(rotation, translation);
-    return result;
-}
+        SE3d pose;
+        pose.trans(x, y, z);
+        pose.rotZ(angle);
 
-} // namespace
-
-TEST(LoopPoseOptimizerTest, Derivatives) {
-    SE3d T1 = GenerateRandomTransformation(),
-        T2 = GenerateRandomTransformation();
-
-    Eigen::Matrix<double, 6, 6> J;
-
-    for (unsigned coord = 0; coord < 6; ++coord) {
-        for (unsigned out = 0; out < 6; ++out) {
-            SE3d T = T1 * T2;
-
-            SE3d::Tangent tangent_out = T.log();
-            SE3d::Tangent tangent_in = T1.log();
-
-            double eps = 0.00001;
-
-            SE3d::Tangent tangent = tangent_in;
-            tangent[coord] += eps;
-            SE3d T_e = SE3d::exp(tangent);
-
-            SE3d::Tangent diff = (T_e * T2).log() - tangent_out;
-            double slope = diff[out] / eps;
-          
-            J(out, coord) = slope;
-        }
+        KeyframePointer keyframe(new Keyframe());
+        keyframe->pose = pose;
+        keyframes.push_back(keyframe);
     }
 
-    std::cout << J << std::endl << std::endl;
+    // 2. Add a new constraint connecting 9 to noon
+    SE3d relative_motion = keyframes[1]->pose * keyframes[0]->pose.inverse();
 
-    Matrix3d denominator = (T1.so3() * T2.so3()).inverse().matrix();
-    Matrix3d numerator = SE3d::SO3Type::hat(T1.so3().log()) * T1.so3().matrix() * T2.so3().matrix();
+    // 3. Run optimizer
+    LoopPoseOptimizer optimizer { keyframes };
+    LoopPoseOptimizer::Poses poses(keyframes.size());
 
-    Matrix3d J_rot = denominator * numerator;
-    std::cout << J_rot << std::endl;
+    LoopPoseOptimizer::Parameters parameters {
+        10,
+        0.1
+    };
+
+    Result<double> result = optimizer.Optimize(poses, false, relative_motion, parameters);
+
+    // 4. the resulting poses should be appromimately around a circle
+
+
+    // 5. we'd expect an approximately even spacing
 }
