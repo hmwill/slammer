@@ -65,6 +65,9 @@ SE3d LoopPoseOptimizer::TransformFromParameters(const Eigen::Vector<double, kDim
     T(2, 1) = cos(psi) * sin(phi) + cos(phi) * sin(psi) * sin(theta);
     T(2, 2) = cos(phi) * cos(theta);
     T(2, 3) = z;
+    T(3, 0) = 0.0;
+    T(3, 1) = 0.0;
+    T(3, 2) = 0.0;
     T(3, 3) = 1.0;
 
     return SE3d(T);
@@ -74,6 +77,8 @@ Eigen::Matrix<double, LoopPoseOptimizer::kDimConstraint, LoopPoseOptimizer::kDim
 LoopPoseOptimizer::CalculateJacobianComponent(const SE3d& after, const Eigen::Vector<double, kDimPose>& params, 
                                               const SE3d& before) {
     Eigen::Matrix<double, kDimConstraint, kDimPose> J;
+    J.setZero();
+    
     auto Ti = after.inverse().matrix3x4();
     auto Tj = before.matrix3x4();
 
@@ -412,7 +417,7 @@ Result<double> LoopPoseOptimizer::Optimize(Poses &poses, bool inout, SE3d relati
                            value, parameters.max_iterations, parameters.lambda);
 
     // extract result: multiply each pose with the delta determined through the optimization process
-    for (size_t index = 0; index < poses.size(); ++index) {
+    for (size_t index = 1; index < poses.size(); ++index) {
         auto slot = PoseSlot(index);
         auto delta = TransformFromParameters(value(slot));
         poses[index] = delta * poses[index];
@@ -428,41 +433,33 @@ LoopPoseOptimizer::CalculateJacobian(const Poses &poses, const SE3d &relative_mo
     std::vector<Triplet> triplets;
     size_t num_constraints = 0;
 
-    for (size_t index = 0; index < keyframes_.size() - 1; ++index, num_constraints += kDimConstraint) {
+    // Special case: edge from 0 to 1 (frame 0 is fixed)
+    // Calculate Jacobian for to node
+    auto J_to = -CalculateJacobianComponent(poses[0].inverse(), value(PoseSlot(1)), poses[1]);
+    EmitTriplets(J_to, std::back_insert_iterator(triplets), 0, 0);
+    num_constraints += kDimConstraint;
+
+    for (size_t index = 1; index < keyframes_.size() - 1; ++index, num_constraints += kDimConstraint) {
         size_t from_index = index;
         size_t to_index = index + 1;
-        const auto &measured_motion = measured_motion_[index];
-
-        auto from_slot = PoseSlot(from_index);
-        auto to_slot = PoseSlot(to_index + 1);
-        auto from_pose = SE3d::exp(value(from_slot));
-        auto to_pose = SE3d::exp(value(to_slot));
-        auto diff_motion = measured_motion.inverse() * (to_pose * from_pose.inverse());
-        auto residual = diff_motion.log();
 
         // Calculate Jacobian for from node
-        auto J_from = CalculateJacobianComponent(poses[to_index].inverse(), value(from_slot), poses[from_index]);
-        EmitTriplets(J_from, std::back_insert_iterator(triplets), index * kDimConstraint, from_index * kDimPose);
+        auto J_from = CalculateJacobianComponent(poses[to_index].inverse(), value(PoseSlot(from_index)), 
+                                                 poses[from_index]);
+        EmitTriplets(J_from, std::back_insert_iterator(triplets), index * kDimConstraint, 
+                     (from_index - 1) * kDimPose);
 
         // Calculate Jacobian for to node
-        auto J_to = -CalculateJacobianComponent(poses[from_index].inverse(), value(to_slot), poses[to_index]);
-        EmitTriplets(J_to, std::back_insert_iterator(triplets), index * kDimConstraint, to_index * kDimPose);
+        auto J_to = -CalculateJacobianComponent(poses[from_index].inverse(), value(PoseSlot(to_index)), 
+                                                poses[to_index]);
+        EmitTriplets(J_to, std::back_insert_iterator(triplets), index * kDimConstraint, (to_index - 1) * kDimPose);
     }
 
     // generate closing constraint from last keyframe to first
     size_t last_pose_index = keyframes_.size() - 1;
-    auto from_slot = PoseSlot(last_pose_index);
-    auto to_slot = PoseSlot(0);
-
-    // Calculate Jacobian for from node
-    auto J_from = CalculateJacobianComponent(poses[0].inverse(), value(from_slot), poses[last_pose_index]);
-    EmitTriplets(J_from, std::back_insert_iterator(triplets), num_constraints, last_pose_index * kDimPose);
-
-    // Calculate Jacobian for to node
-    auto J_to = -CalculateJacobianComponent(poses[last_pose_index].inverse(), value(to_slot), poses[0]);
-    EmitTriplets(J_to, std::back_insert_iterator(triplets), num_constraints, 0);
-
-    // Wrap up matrix generation
+    auto J_from = CalculateJacobianComponent(poses[0].inverse(), value(PoseSlot(last_pose_index)), 
+                                             poses[last_pose_index]);
+    EmitTriplets(J_from, std::back_insert_iterator(triplets), num_constraints, (last_pose_index - 1) * kDimPose);
     num_constraints += kDimConstraint;
     assert(num_constraints == total_constraints());
 
@@ -475,10 +472,13 @@ void LoopPoseOptimizer::CalculateResidual0(const Poses &poses, Eigen::VectorXd &
                                            const Eigen::VectorXd &value, size_t from_index, size_t to_index,
                                            size_t residual_index) const {
     auto residual_slot = Eigen::seqN(residual_index * kDimConstraint, int(kDimConstraint));
-    auto from_slot = PoseSlot(from_index);
-    auto to_slot = PoseSlot(to_index + 1);
-    auto from_pose = TransformFromParameters(value(from_slot)) * poses[from_index];
-    auto to_pose = TransformFromParameters(value(to_slot)) * poses[to_index];
+
+    auto from_pose = 
+        from_index > 0 ? TransformFromParameters(value(PoseSlot(from_index))) * poses[from_index] : poses[from_index];
+
+    auto to_pose = 
+        to_index > 0 ? TransformFromParameters(value(PoseSlot(to_index))) * poses[to_index] : poses[to_index];
+
     auto diff_motion = measured_motion.inverse() * (to_pose * from_pose.inverse());
     residual(residual_slot) = diff_motion.matrix3x4().reshaped<Eigen::RowMajor>();
 }

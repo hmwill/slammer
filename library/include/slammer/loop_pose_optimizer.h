@@ -125,17 +125,18 @@ private:
     /// Return the offset associated with a given keyframe pose identified by its index within the
     /// overall vector of variables to optimize
     ///
-    /// \param index    the index of the keyframe within the vector of keyframes
+    /// \param index    the index of the keyframe within the vector of keyframes; we do not have a slot for index 0
     /// \returns        the slot of values witjin the state variable vector
     inline auto PoseSlot(size_t index) const ->
         decltype(Eigen::seqN(index, int(kDimPose))) {
+        assert(index > 0);
         assert(index < keyframes_.size());
-        size_t start = index * kDimPose;
+        size_t start = (index - 1) * kDimPose;
         return Eigen::seqN(start, int(kDimPose));
     }
 
     /// Return the overall dimension of the optimization problem
-    size_t total_dimension() const { return keyframes_.size() * kDimPose; }
+    size_t total_dimension() const { return (keyframes_.size() - 1) * kDimPose; }
 
     /// Return the overall number of constraints of the optimization problem
     inline size_t total_constraints() const { return keyframes_.size() * kDimConstraint; }
