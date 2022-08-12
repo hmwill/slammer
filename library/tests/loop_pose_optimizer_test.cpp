@@ -264,7 +264,7 @@ TEST(LoopPoseOptimizer, DistortPoses) {
     Result<double> result = optimizer.Optimize(poses, false, relative_motion, parameters);
 
     EXPECT_TRUE(result.ok());
-    std::cout << "Residual error = " << result.value() << std::endl;
+    // std::cout << "Residual error = " << result.value() << std::endl;
 
     // 4. We expect the output poses to more or less match the input poses, up to rounding error
     constexpr auto kEpsilon = 1.0E-3;
@@ -273,12 +273,12 @@ TEST(LoopPoseOptimizer, DistortPoses) {
         auto diffPose = poses[index].inverse() * original[index];
         auto delta = diffPose.log();
 
-        std::cout << "index:" << std::endl << index << std::endl;
-        std::cout << "original:" << std::endl << original[index].matrix3x4() << std::endl;
-        std::cout << "perturbed:" << std::endl << keyframes[index]->pose.matrix3x4() << std::endl;
-        std::cout << "reconstructed:" << std::endl << poses[index].matrix3x4() << std::endl;
-        std::cout << "diffPose:" << std::endl << diffPose.matrix3x4() << std::endl;
-        std::cout << "delta:" << std::endl << delta << std::endl;
+        // std::cout << "index:" << std::endl << index << std::endl;
+        // std::cout << "original:" << std::endl << original[index].matrix3x4() << std::endl;
+        // std::cout << "perturbed:" << std::endl << keyframes[index]->pose.matrix3x4() << std::endl;
+        // std::cout << "reconstructed:" << std::endl << poses[index].matrix3x4() << std::endl;
+        // std::cout << "diffPose:" << std::endl << diffPose.matrix3x4() << std::endl;
+        // std::cout << "delta:" << std::endl << delta << std::endl;
 
         EXPECT_LE(delta.squaredNorm(), kEpsilon);
     }

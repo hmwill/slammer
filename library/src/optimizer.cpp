@@ -106,6 +106,7 @@ slammer::LevenbergMarquardt(const Jacobian& jacobian_function, const Residual& r
         auto candidate_value = value - delta;
         auto candidate_residual = residual_function(candidate_value);
         auto candidate_error = candidate_residual.squaredNorm();
+        // std::cout << "Candidate error =  " << candidate_error << std::endl;
 
         if (candidate_error < error) {
             value = candidate_value;
