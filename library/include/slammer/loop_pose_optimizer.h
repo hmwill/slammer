@@ -38,6 +38,9 @@
 
 #include "Eigen/Sparse"
 
+// Forward declaration of a test case class
+class LoopPoseOptimizer_Derivatives_Test;
+
 namespace slammer {
 
 /// Optimize poses against a circular set of constraints as result of loop closure.
@@ -115,12 +118,17 @@ private:
                                           const Eigen::VectorXd& value, size_t from_index, size_t to_index, 
                                           size_t residual_index) const;
 
+    // Allow access to the following two static functions from test case
+    friend class ::LoopPoseOptimizer_Derivatives_Test;
+
+    using PoseParameters = Eigen::Vector<double, kDimPose>;
+
     /// Calculate an SE(3) element from the provided parameters
-    static SE3d TransformFromParameters(const Eigen::Vector<double, kDimPose>& params);
+    static SE3d TransformFromParameters(const PoseParameters& params);
 
     /// Calculate the Jacobian for the parameters of a relative motion
     static Eigen::Matrix<double, kDimConstraint, kDimPose> 
-    CalculateJacobianComponent(const SE3d& after, const Eigen::Vector<double, kDimPose>& params, const SE3d& before);
+    CalculateJacobianComponent(const SE3d& after, const PoseParameters& params, const SE3d& before);
     
     /// Return the offset associated with a given keyframe pose identified by its index within the
     /// overall vector of variables to optimize

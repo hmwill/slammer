@@ -38,18 +38,18 @@ using sparse::EmitTriplets;
 
 void LoopPoseOptimizer::Initialize() {
     for (size_t index = 0; index < keyframes_.size() - 1; ++index) {
-        SE3d relative_motion = keyframes_[index + 1]->pose * keyframes_[index]->pose.inverse();
+        SE3d relative_motion = keyframes_[index + 1]->pose.inverse() * keyframes_[index]->pose;
         measured_motion_.push_back(relative_motion);
     }
 }
 
-SE3d LoopPoseOptimizer::TransformFromParameters(const Eigen::Vector<double, kDimPose>& params) {
-    auto x     = params[0];
-    auto y     = params[1];
-    auto z     = params[2];
-    auto phi   = params[3];
-    auto psi   = params[4];
-    auto theta = params[5];
+SE3d LoopPoseOptimizer::TransformFromParameters(const PoseParameters& params) {
+    auto phi   = params[0];
+    auto psi   = params[1];
+    auto theta = params[2];
+    auto x     = params[3];
+    auto y     = params[4];
+    auto z     = params[5];
 
     Eigen::Matrix4d T;
 
@@ -74,7 +74,7 @@ SE3d LoopPoseOptimizer::TransformFromParameters(const Eigen::Vector<double, kDim
 }
 
 Eigen::Matrix<double, LoopPoseOptimizer::kDimConstraint, LoopPoseOptimizer::kDimPose> 
-LoopPoseOptimizer::CalculateJacobianComponent(const SE3d& after, const Eigen::Vector<double, kDimPose>& params, 
+LoopPoseOptimizer::CalculateJacobianComponent(const SE3d& after, const PoseParameters& params, 
                                               const SE3d& before) {
     Eigen::Matrix<double, kDimConstraint, kDimPose> J;
     J.setZero();
@@ -108,12 +108,12 @@ LoopPoseOptimizer::CalculateJacobianComponent(const SE3d& after, const Eigen::Ve
     auto Tj3_3 = Tj(2, 2);
     auto Tj3_4 = Tj(2, 3);
 
-    auto x     = params[0];
-    auto y     = params[1];
-    auto z     = params[2];
-    auto phi   = params[3];
-    auto psi   = params[4];
-    auto theta = params[5];
+    auto phi   = params[0];
+    auto psi   = params[1];
+    auto theta = params[2];
+    auto x     = params[3];
+    auto y     = params[4];
+    auto z     = params[5];
 
     auto sin_phi = sin(phi);
     auto cos_phi = cos(phi);
@@ -479,7 +479,7 @@ void LoopPoseOptimizer::CalculateResidual0(const Poses &poses, Eigen::VectorXd &
     auto to_pose = 
         to_index > 0 ? TransformFromParameters(value(PoseSlot(to_index))) * poses[to_index] : poses[to_index];
 
-    auto diff_motion = measured_motion.matrix3x4() - (to_pose * from_pose.inverse()).matrix3x4();
+    auto diff_motion = measured_motion.matrix3x4() - (to_pose.inverse() * from_pose).matrix3x4();
     residual(residual_slot) = diff_motion.reshaped<Eigen::RowMajor>();
 }
 
