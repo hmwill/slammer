@@ -30,6 +30,7 @@
 
 #include "slammer/camera.h"
 
+
 using namespace slammer;
 
 

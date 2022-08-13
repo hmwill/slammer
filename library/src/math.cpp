@@ -35,14 +35,6 @@
 
 #include "Eigen/SVD"
 
-#include "g2o/types/slam3d/types_slam3d.h"
-#include "g2o/core/sparse_optimizer.h"
-#include "g2o/core/block_solver.h"
-#include "g2o/core/robust_kernel.h"
-#include "g2o/core/robust_kernel_impl.h"
-#include "g2o/core/optimization_algorithm_levenberg.h"
-#include "g2o/solvers/cholmod/linear_solver_cholmod.h"
-#include "g2o/solvers/eigen/linear_solver_eigen.h"
 
 using namespace slammer;
 
@@ -52,12 +44,6 @@ namespace {
 void CreateRandomIndices(std::vector<size_t>& indices, std::default_random_engine& random_engine) {
     std::iota(begin(indices), end(indices), 0);
     std::shuffle(begin(indices), end(indices), random_engine);
-}
-
-inline g2o::Isometry3 IsometryFromSE3d(const SE3d& se3d) {
-    auto rotation = se3d.unit_quaternion();
-    auto translation = se3d.translation();
-    return Eigen::Translation3d(translation) * Eigen::AngleAxisd(rotation);
 }
 
 double EstimateVariance(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
@@ -204,103 +190,3 @@ size_t slammer::RobustIcp(const std::vector<Point3d>& reference, const std::vect
     return best_num_inliers;
 }
 
-SE3d slammer::OptimizeAlignment(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
-                                const std::vector<uchar>& mask, const Camera& camera, double baseline, size_t iterations) {
-    g2o::SparseOptimizer optimizer;
-
-    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;
-    typedef g2o::LinearSolverCholmod<BlockSolverType::PoseMatrixType> LinearSolverType;
-
-    auto algorithm = new g2o::OptimizationAlgorithmLevenberg(
-        g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
-
-    optimizer.setAlgorithm(algorithm);
-    optimizer.setVerbose(false);
-
-    // add the point coordinates
-    for (size_t index = 0; index < reference.size(); ++index) {
-        if (!mask[index]) {
-            continue;
-        }
-
-        auto point = new g2o::VertexPointXYZ();
-        point->setId(index);
-        point->setMarginalized(true);
-        point->setEstimate(reference[index]);
-        optimizer.addVertex(point);
-    }
-
-    // We have two camera vertices; one of them fixed at the origin
-    size_t origin_index = reference.size();
-    auto origin_pose = new g2o::VertexSE3();
-    origin_pose->setId(origin_index);
-    origin_pose->setEstimate(IsometryFromSE3d(SE3d()));
-    origin_pose->setFixed(true);
-    optimizer.addVertex(origin_pose);
-
-    size_t transformed_index = origin_index + 1;
-    auto transformed_pose = new g2o::VertexSE3();
-    transformed_pose->setId(transformed_index);
-    transformed_pose->setEstimate(IsometryFromSE3d(SE3d()));
-    transformed_pose->setFixed(false);
-    optimizer.addVertex(transformed_pose);
-
-    auto camera_parameters = new g2o::ParameterCamera();
-    camera_parameters->setId(0);
-    camera_parameters->setKcam(camera.fx(), camera.fy(), 0.0, 0.0 /*camera.cx(), camera.cy()*/);
-    // camera_parameters->setKcam(camera.fx(), camera.fy(), camera.cx(), camera.cy());
-    //camera_parameters->setBaseline(baseline);
-    optimizer.addParameter(camera_parameters);
-
-    // using EdgeType = g2o::EdgeSE3PointXYZDisparity;
-    using EdgeType = g2o::EdgeSE3PointXYZ;
-
-    EdgeType::InformationType information;
-    // information <<
-    //     1.0, 0.0, 0.0, 
-    //     0.0, 1.0, 0.0,
-    //     0.0, 0.0, 1000.0 * camera.fx() * baseline;
-
-    for (size_t index = 0; index < reference.size(); ++index) {
-        if (!mask[index]) {
-            continue;
-        }
-
-        auto edge = new EdgeType();
-        edge->setVertex(0, optimizer.vertex(origin_index));
-        edge->setVertex(1, optimizer.vertex(index));
-        edge->setInformation(information);
-
-        edge->setParameterId(0, 0);
-        edge->setRobustKernel(new g2o::RobustKernelHuber());
-        optimizer.addEdge(edge);
-        edge->setMeasurementFromState();
-
-        edge = new EdgeType();
-        edge->setVertex(0, optimizer.vertex(transformed_index));
-        edge->setVertex(1, optimizer.vertex(index));
-        edge->setInformation(information);
-
-        edge->setParameterId(0, 0);
-        edge->setRobustKernel(new g2o::RobustKernelHuber());
-        auto camera_pt = camera.CameraToPixel(transformed[index]);
-        // Point3d measurement(camera_pt.x - camera.cx(), camera_pt.y - camera.cy(), 1.0/transformed[index].z());
-        // Point3d measurement(camera_pt.x, camera_pt.y, 1.0/transformed[index].z()); //camera.fx() * baseline
-        Point3d measurement(transformed[index]);
-        optimizer.addEdge(edge);
-        edge->setMeasurement(measurement);
-    }
-
-    // Perform the actual optimization
-    optimizer.setVerbose(false); // while debugging
-    optimizer.initializeOptimization();
-    optimizer.optimize(iterations);
-
-    // retrieve results
-    auto vertex = dynamic_cast<g2o::VertexSE3 *>(optimizer.vertex(transformed_index));
-    auto isometry = vertex->estimate();
-    auto rotation = isometry.rotation();
-    auto translation = isometry.translation();
-
-    return SE3d(rotation, translation);
-}

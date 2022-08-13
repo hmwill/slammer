@@ -479,8 +479,8 @@ void LoopPoseOptimizer::CalculateResidual0(const Poses &poses, Eigen::VectorXd &
     auto to_pose = 
         to_index > 0 ? TransformFromParameters(value(PoseSlot(to_index))) * poses[to_index] : poses[to_index];
 
-    auto diff_motion = measured_motion.matrix3x4() - (to_pose.inverse() * from_pose).matrix3x4();
-    residual(residual_slot) = -diff_motion.reshaped<Eigen::RowMajor>();
+    auto diff_motion = (to_pose.inverse() * from_pose).matrix3x4() - measured_motion.matrix3x4();
+    residual(residual_slot) = diff_motion.reshaped<Eigen::RowMajor>();
 }
 
 // The residual is comprised of blocks of six row each, in order of the provided keyframes. The six rows correspond

@@ -71,21 +71,6 @@ size_t RobustIcp(const std::vector<Point3d>& reference, const std::vector<Point3
                  size_t max_iterations = 30, size_t sample_size = 10, double threshold = 7.16,
                  size_t min_additional_inliers = 20);
 
-/// Determine an affine transformation that maps the `reference` point set onto the 
-/// `transformed` point set, where corresponding points are stored at the same index.
-///
-/// This function calculates ICP using least squares optimization.
-///
-/// \param reference    point coordinates in the reference frame
-/// \param transformed  point coordinates in the transformed frame to be estimated
-/// \param mask         mask to exclude points from being considered
-/// \param camera       description of the camera projection
-/// \param baseline     distance between the two stereo cameras used for depth calculation via disparity
-/// \param iterations   maximum number of iterations
-///
-/// \return Estimated affine transformation
-SE3d OptimizeAlignment(const std::vector<Point3d>& reference, const std::vector<Point3d>& transformed,
-                       const std::vector<uchar>& mask, const Camera& camera, double baseline, size_t iterations);
 
 } // namespace slammer
 

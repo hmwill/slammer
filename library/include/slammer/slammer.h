@@ -56,11 +56,15 @@
 #include <unordered_set>
 #include <variant>
 
+#include <fmt/core.h>
+
 #include "opencv2/opencv.hpp"
 
 #include "Eigen/Core" 
 #include "Eigen/LU" 
 
+// To prevent incompatibilities with fmt 9.x
+#define SOPHUS_USE_BASIC_LOGGING
 #include "sophus/se3.hpp"
 
 using namespace std::string_literals;

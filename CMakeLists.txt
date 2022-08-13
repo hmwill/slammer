@@ -35,9 +35,6 @@ include_directories(${OpenCV_INCLUDE_DIRS})
 find_package(SuiteSparse CONFIG REQUIRED)
 include_directories(${SuiteSparse_INCLUDE_DIRS})
 
-find_package(g2o REQUIRED)
-include_directories(${g2o_INCLUDE_DIRS})
-
 find_package(fmt REQUIRED)
 include_directories(${fmt_INCLUDE_DIRS})
 

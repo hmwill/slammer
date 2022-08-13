@@ -24,7 +24,7 @@ target_include_directories(slammer_lib PUBLIC
 )
 
 target_link_libraries(slammer_lib
-  SuiteSparse::cholmod fmt::fmt png
+  fmt::fmt png
 )
 
 add_executable(test_slammer_lib 
@@ -49,7 +49,6 @@ add_dependencies(test_slammer_lib slammer_lib)
 target_link_libraries(test_slammer_lib 
   slammer_lib ${OpenCV_LIBS} GTest::gtest GTest::gtest_main
   ${Boost_LIBRARIES}
-  g2o::core g2o::stuff g2o::types_slam3d g2o::solver_cholmod
   Eigen3::Eigen
   png
   fmt::fmt

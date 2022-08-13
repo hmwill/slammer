@@ -34,16 +34,8 @@
 #include "slammer/math.h"
 #include "slammer/pnp.h"
 
+#include "slammer/loop_pose_optimizer.h"
 #include "slammer/poses_locations_optimizer.h"
-
-#include "g2o/types/slam3d/types_slam3d.h"
-#include "g2o/core/sparse_optimizer.h"
-#include "g2o/core/block_solver.h"
-#include "g2o/core/robust_kernel.h"
-#include "g2o/core/robust_kernel_impl.h"
-#include "g2o/core/optimization_algorithm_levenberg.h"
-#include "g2o/solvers/cholmod/linear_solver_cholmod.h"
-#include "g2o/solvers/eigen/linear_solver_eigen.h"
 
 
 using namespace slammer;
@@ -59,13 +51,6 @@ void MatchFeaturesToLandmarks(const KeyframePointer& reference_frame, const Keyf
         new_frame->features[match.query_index]->landmark = landmark;
         landmark->observations.push_back(new_frame->features[match.query_index]);
     }
-}
-
-/// Convert a Sophus SE(3) element to an Isometry3 value accepted by g2o
-inline g2o::Isometry3 IsometryFromSE3d(const SE3d& se3d) {
-    auto rotation = se3d.unit_quaternion();
-    auto translation = se3d.translation();
-    return Eigen::Translation3d(translation) * Eigen::AngleAxisd(rotation);
 }
 
 } // namespace
@@ -352,82 +337,18 @@ void Backend::ExtractLocalGraph(const Keyframes& seeds, Keyframes& keyframes,
 Backend::Poses 
 Backend::OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& from, 
                            const KeyframePointer& to, SE3d relative_motion) {
-    g2o::SparseOptimizer optimizer;
 
-    typedef g2o::BlockSolver<g2o::BlockSolverTraits<6, 3>> BlockSolverType;
-    typedef g2o::LinearSolverCholmod<BlockSolverType::PoseMatrixType> LinearSolverType;
+    // TODO: Are the keyframes in correct order, such that the relative_motion constrant applies between
+    // the first and last frame?
+    LoopPoseOptimizer optimizer { keyframes };
+    LoopPoseOptimizer::Poses poses { keyframes.size() };
 
-    auto algorithm = new g2o::OptimizationAlgorithmLevenberg(
-        g2o::make_unique<BlockSolverType>(g2o::make_unique<LinearSolverType>()));
-
-    optimizer.setAlgorithm(algorithm);
-    optimizer.setVerbose(false);
-
-    absl::btree_map<Timestamp, size_t> keyframe_indices;
-
-    // Ceate the nodes of the graph
-
-    for (size_t index = 0; index < keyframes.size(); ++index) {
-        const auto& keyframe = keyframes[index];
-
-        keyframe_indices[keyframe->timestamp] = index;
-
-        auto vertex = new g2o::VertexSE3();
-        vertex->setId(index);
-        vertex->setEstimate(IsometryFromSE3d(keyframe->pose));
-        vertex->setFixed(keyframe->pinned || keyframe == to);
-        optimizer.addVertex(vertex);
-    }
-
-    // Create the edges of the graph
-    auto create_edge = [&](size_t from_index, size_t to_index) -> g2o::EdgeSE3* {
-        const auto& from = keyframes[from_index];
-        const auto& to = keyframes[to_index];
-
-        auto edge = new g2o::EdgeSE3();
-        edge->setVertex(0, optimizer.vertex(from_index));
-        edge->setVertex(1, optimizer.vertex(to_index));
-        edge->setInformation(g2o::EdgeSE3::InformationType::Identity());
-
-        // What is this?
-        //edge->setParameterId(0, 0);
-        edge->setRobustKernel(new g2o::RobustKernelHuber());
-
-        return edge;
+    LoopPoseOptimizer::Parameters parameters {
+        20,
+        0.1
     };
 
-    for (size_t keyframe_index = 0; keyframe_index < keyframes.size(); ++keyframe_index) {
-        const auto& keyframe = keyframes[keyframe_index];
-
-        for (const auto& neighbor: keyframe->neighbors) {
-            auto neighbor_index = keyframe_indices[neighbor->timestamp];
-            auto edge = create_edge(keyframe_index, neighbor_index);
-            edge->setMeasurementFromState();
-            optimizer.addEdge(edge);
-        }
-    }
-
-    // add the loop closure constraint
-    auto edge = create_edge(keyframe_indices[from->timestamp], keyframe_indices[to->timestamp]);
-    edge->setMeasurement(IsometryFromSE3d(relative_motion));
-    optimizer.addEdge(edge);
-
-    // Perform the actual optimization
-    optimizer.setVerbose(true); // while debugging
-    optimizer.initializeOptimization();
-    optimizer.optimize(parameters_.local_optimization_iterations);
-
-    // retrieve results
-    Poses poses;
-
-    for (size_t index = 0; index < keyframes.size(); ++index) {
-        auto vertex = dynamic_cast<g2o::VertexSE3 *>(optimizer.vertex(index));
-        auto isometry = vertex->estimate();
-        auto rotation = isometry.rotation();
-        auto translation = isometry.translation();
-        SE3d pose(rotation, translation);
-        poses.push_back(pose);
-    }
+    Result<double> result = optimizer.Optimize(poses, false, relative_motion, parameters);
 
     return poses;
 }
