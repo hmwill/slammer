@@ -479,7 +479,6 @@ PoseGraphOptimizer::CalculateJacobian(const Poses &poses, const Constraints& con
             auto J_from = CalculateJacobianComponent(to_pose.inverse(), value(PoseSlot(from_iter->second)), 
                                                     from_pose);
             EmitTriplets(J_from, std::back_insert_iterator(triplets), num_constraints,  from_iter->second * kDimPose);
-            num_constraints += kDimConstraint;
         }
 
         if (to_iter != index_.end()) {
@@ -487,8 +486,9 @@ PoseGraphOptimizer::CalculateJacobian(const Poses &poses, const Constraints& con
             auto J_to = -CalculateJacobianComponent(from_pose.inverse(), value(PoseSlot(to_iter->second)), 
                                                     to_pose);
             EmitTriplets(J_to, std::back_insert_iterator(triplets), num_constraints, to_iter->second * kDimPose);
-            num_constraints += kDimConstraint;
         }
+
+        num_constraints += kDimConstraint;
     }
 
     assert(num_constraints == total_constraints(constraints));

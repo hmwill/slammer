@@ -261,3 +261,115 @@ TEST(PoseGraphOptimizer, DistortPoses) {
     });
 }
 
+// This test case applies the optimizer to a configuration that already reflects the
+// additional loop constraint. We therefore expect the resulting output poses to match the
+// input poses.
+//
+// In this test, all edges are provided as explicit constraints
+TEST(PoseGraphOptimizer, OnlyConstraints) {
+    // 1. Generate poses from noon to 9 hours along a circle
+    std::vector<KeyframePointer> all_frames;
+
+    constexpr double kTwoPi = M_PI * 2.0;
+    constexpr double kScale = 10.0;
+    constexpr size_t kLastHour = 9;
+    constexpr auto kHours = 12.0;
+
+    constexpr auto kDisturbTranslation = 0.5 / kTwoPi;
+    constexpr auto kDisturbAngle = 0.25 / kTwoPi;
+
+    double z = 1.0;
+
+    for (size_t index = 0; index <= kLastHour; ++index, z = -z) {
+        auto angle = index / kHours * kTwoPi;
+
+        double x = sin(angle) * kScale;
+        double y = cos(angle) * kScale;
+
+        SE3d pose = SE3d::trans(x, y, z) * SE3d::rotZ(angle);
+
+        KeyframePointer keyframe(new Keyframe());
+        keyframe->pose = pose;
+        keyframe->timestamp = Timestamp { Timediff { index } };
+
+        all_frames.emplace_back(std::move(keyframe));
+    }
+
+    PoseGraphOptimizer::Keyframes keyframes;
+
+    // include all but first frame into set to optimize
+    for (size_t index = 1; index < all_frames.size(); ++index) {
+        // all to frames should be subject to optimization
+        keyframes.push_back(all_frames[index].get());
+    }
+
+    // 2. Add a new constraint connecting kLastHour to noon
+    PoseGraphOptimizer::Constraints constraints;
+    
+    for (size_t index = 0; index < all_frames.size(); ++index) {
+        auto from = all_frames[index].get();
+        auto to = all_frames[(index + 11) % all_frames.size()].get();
+
+        constraints.emplace_back(PoseGraphOptimizer::Constraint {from, to, to->pose.inverse() * from->pose});
+    }
+
+    // 3. Create optimizer
+    PoseGraphOptimizer optimizer { keyframes };
+    PoseGraphOptimizer::Poses poses { keyframes.size() };
+
+    // 3.1 Disturb the keyframe poses
+    std::vector<SE3d> original, perturbed;
+
+    std::mt19937_64 engine;
+    std::uniform_real_distribution translate(0.0, kDisturbTranslation);
+    std::uniform_real_distribution rotate(0.0, kDisturbAngle);
+
+    std::for_each(keyframes.begin(), keyframes.end(), [&](Keyframe* keyframe){
+        SE3d::Tangent distortion {
+            translate(engine),
+            translate(engine),
+            translate(engine),
+            rotate(engine),
+            rotate(engine),
+            rotate(engine),
+        };
+
+        original.push_back(keyframe->pose);
+        perturbed.push_back(SE3d::exp(distortion) * keyframe->pose);
+        keyframe->pose = SE3d::exp(distortion) * keyframe->pose;
+    });
+
+    // 3.2 Run optimizer 
+    PoseGraphOptimizer::Parameters parameters {
+        50,
+        0.01
+    };
+
+    Result<double> result = optimizer.Optimize(poses, false, constraints, parameters);
+
+    EXPECT_TRUE(result.ok());
+    // std::cout << "Residual error = " << result.value() << std::endl;
+
+    // 4. We expect the output poses to more or less match the input poses, up to rounding error
+    constexpr auto kEpsilon = 1.0E-3;
+    
+    for (size_t index = 0; index < keyframes.size(); ++index) {
+        auto diffPose = poses[index].inverse() * original[index];
+        auto delta = diffPose.log();
+
+        // std::cout << "index:" << std::endl << index << std::endl;
+        // std::cout << "original:" << std::endl << original[index].matrix3x4() << std::endl;
+        // std::cout << "perturbed:" << std::endl << perturbed[index].matrix3x4() << std::endl;
+        // std::cout << "reconstructed:" << std::endl << poses[index].matrix3x4() << std::endl;
+        // std::cout << "diffPose:" << std::endl << diffPose.matrix3x4() << std::endl;
+        // std::cout << "delta:" << std::endl << delta << std::endl;
+
+        EXPECT_LE(delta.squaredNorm(), kEpsilon);
+    }
+
+    // Break graph cycles
+    std::for_each(all_frames.begin(), all_frames.end(), [](auto& keyframe) {
+        keyframe->covisible.clear();
+    });
+}
+
