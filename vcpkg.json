@@ -4,6 +4,7 @@
     "dependencies": [
       "abseil",
       "boost",
+      "intel-mkl",
       "eigen3",
       "fmt",
       "gtest",
