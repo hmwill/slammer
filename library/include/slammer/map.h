@@ -80,10 +80,10 @@ struct Keyframe: std::enable_shared_from_this<Keyframe> {
     // Image descriptor; will be filled in by KeyframeIndex
     std::unique_ptr<ImageDescriptor> descriptor;
 
-    // Covisible frames (should those be ordered by time)
+    // Covisible frames (should those be ordered by time) forming the pose graph
     KeyframeSet covisible;
 
-    // Pose graph edges; always go backwards in time
+    // Traversal graph edges; always go backwards in time
     KeyframeSet neighbors;
 
     // TODO: Attached image/point cloud?

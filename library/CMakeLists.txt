@@ -12,6 +12,7 @@ add_library(slammer_lib
   src/orb.cpp
   src/pnp.cpp
   src/loop_pose_optimizer.cpp
+  src/pose_graph_optimizer.cpp
   src/poses_locations_optimizer.cpp
   src/utility.cpp
   src/loris/driver.cpp src/loris/opencv_utils.cpp
@@ -39,6 +40,7 @@ add_executable(test_slammer_lib
   tests/keyframe_index_test.cpp
   tests/optimizer_test.cpp
   tests/loop_pose_optimizer_test.cpp
+  tests/pose_graph_optimizer_test.cpp
   tests/orb_test.cpp
   tests/utility_test.cpp
   tests/loris/driver_test.cpp tests/loris/opencv_utils_test.cpp
