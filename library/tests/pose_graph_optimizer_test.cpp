@@ -229,7 +229,7 @@ TEST(PoseGraphOptimizer, DistortPoses) {
 
     // 3.2 Run optimizer 
     PoseGraphOptimizer::Parameters parameters {
-        100,
+        40,
         0.01
     };
 
