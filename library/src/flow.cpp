@@ -30,7 +30,7 @@
 
 #include "slammer/flow.h"
 
-#include <boost/gil/extension/numeric/kernel.hpp>
+#include <boost/gil/image_processing/kernel.hpp>
 #include <boost/gil/extension/numeric/sampler.hpp>
 
 #include "Eigen/Dense"

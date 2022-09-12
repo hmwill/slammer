@@ -182,7 +182,7 @@ public:
 void PlotPath(const std::string& filename, const std::vector<Point3d>& locations, bool use_z = true) {
     using namespace sciplot;
 
-    Plot plot;
+    Plot2D plot;
 
     std::vector<double> x, y, z;
 
@@ -194,13 +194,15 @@ void PlotPath(const std::string& filename, const std::vector<Point3d>& locations
 
     plot.drawCurve(x, use_z ? z : y);
 
-    plot.save(filename);
+    Figure fig {{plot}};
+    Canvas canvas {{fig}};
+    canvas.save(filename);
 }
 
 void PlotPath(const std::string& filename, const std::vector<SE3d>& poses, bool use_z = true) {
     using namespace sciplot;
 
-    Plot plot;
+    Plot2D plot;
 
     std::vector<double> x, y, z;
 
@@ -213,7 +215,9 @@ void PlotPath(const std::string& filename, const std::vector<SE3d>& poses, bool 
 
     plot.drawCurve(x, use_z ? z : y);
 
-    plot.save(filename);
+    Figure fig {{plot}};
+    Canvas canvas {{fig}};
+    canvas.save(filename);
 }
 
 } // namespace
