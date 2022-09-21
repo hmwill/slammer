@@ -55,6 +55,21 @@ public:
     using Poses = std::vector<SE3d>;
     using Locations = std::vector<Point3d>;
 
+    /// Parameters for perspective and points calculation
+    struct PnpParameters {
+        // RANSAC iteration limit
+        size_t max_iterations = 30;
+        
+        // RANSAC sample size
+        size_t sample_size = 6;
+        
+        /// RANSAC outlier threshold
+        double outlier_threshold = 7.81;
+
+        /// Levenberg-Marquardt initial lambda parameter for PnP calculation  
+        double lambda = 0.01;
+    };
+
     /// Configuration parameters for the backend process 
     struct Parameters {
         // maximum (Hamming) difference between features to be considered a match
@@ -87,14 +102,8 @@ public:
         // maximum angular correction to pose orientation to allow for loop closure candidate
         double max_loop_correction_angle = std::numeric_limits<double>::max(); 
 
-        // ICP iteration limit
-        unsigned max_iterations = 30;
-        
-        // ICP sample size
-        unsigned sample_size = 10;
-        
-        /// ICP outlier factor
-        double outlier_factor = 7.16;        
+        // PerspectiveAndPoints parameters
+        PnpParameters pnp_parameters;    
 
         // seed value for random number generator
         int seed = 12345;

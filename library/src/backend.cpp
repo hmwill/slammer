@@ -34,7 +34,7 @@
 #include "slammer/math.h"
 #include "slammer/pnp.h"
 
-#include "slammer/loop_pose_optimizer.h"
+#include "slammer/pose_graph_optimizer.h"
 #include "slammer/poses_locations_optimizer.h"
 
 
@@ -125,21 +125,32 @@ void Backend::HandleKeyframeEvent(const KeyframeEvent& frame) {
             }
 
             std::vector<Point3d> keyframe_points, candidate_points;
+            PerspectiveAndPoint3d::PointPairs point_pairs;
 
             for (const auto& match: matches) {
                 keyframe_points.push_back(keyframe->features[match.target_index]->coords);
                 candidate_points.push_back(keyframe->features[match.query_index]->coords);
+                PerspectiveAndPoint3d::PointPair point_pair { 
+                    keyframe->features[match.target_index]->coords,
+                    keyframe->features[match.query_index]->coords
+                };
+                point_pairs.push_back(point_pair);
             }
 
             SE3d relative_motion;
             std::vector<uchar> mask;
 
-            // TODO: Replace by PerspectiveAndPoint3d
-            size_t num_inliers = 
-                RobustIcp(candidate_points, keyframe_points,
-                            random_engine_, relative_motion, mask,
-                            parameters_.max_iterations, parameters_.sample_size, 
-                            parameters_.outlier_factor);        
+            PerspectiveAndPoint3d instance { depth_camera_, depth_camera_, point_pairs };
+
+            Result<double> pnp_result = 
+                instance.Ransac(relative_motion, mask, keyframe_points,
+                                parameters_.pnp_parameters.sample_size, parameters_.pnp_parameters.max_iterations, 
+                                parameters_.pnp_parameters.lambda, parameters_.pnp_parameters.lambda, 
+                                random_engine_);
+
+            assert(pnp_result.ok());
+
+            size_t num_inliers = std::count_if(mask.begin(), mask.end(), [](auto flag) { return flag != 0; });
 
             if (num_inliers < parameters_.min_inlier_matches) {
                 continue;
@@ -218,21 +229,32 @@ bool Backend::DetermineLoopClosure(const KeyframePointer& keyframe, KeyframePoin
         }
 
         std::vector<Point3d> keyframe_points, candidate_points;
+        PerspectiveAndPoint3d::PointPairs point_pairs;
 
         for (const auto& match: matches) {
             keyframe_points.push_back(keyframe->features[match.target_index]->coords);
             candidate_points.push_back(keyframe->features[match.query_index]->coords);
+            PerspectiveAndPoint3d::PointPair point_pair { 
+                keyframe->features[match.target_index]->coords,
+                keyframe->features[match.query_index]->coords
+            };
+            point_pairs.push_back(point_pair);
         }
 
         SE3d relative_motion;
         std::vector<uchar> mask;
 
-        // TODO: Replace by PerspectiveAndPoint3d
-        size_t num_inliers = 
-            RobustIcp(candidate_points, keyframe_points,
-                        random_engine_, relative_motion, mask,
-                        parameters_.max_iterations, parameters_.sample_size, 
-                        parameters_.outlier_factor);            
+        PerspectiveAndPoint3d instance { depth_camera_, depth_camera_, point_pairs };
+
+        Result<double> pnp_result = 
+            instance.Ransac(relative_motion, mask, keyframe_points,
+                            parameters_.pnp_parameters.sample_size, parameters_.pnp_parameters.max_iterations, 
+                            parameters_.pnp_parameters.lambda, parameters_.pnp_parameters.lambda, 
+                            random_engine_);
+
+        assert(pnp_result.ok());
+
+        size_t num_inliers = std::count_if(mask.begin(), mask.end(), [](auto flag) { return flag != 0; });
 
         if (num_inliers < parameters_.min_inlier_matches) {
             continue;
@@ -338,17 +360,27 @@ Backend::Poses
 Backend::OptimizeLoopPoses(const Keyframes& keyframes, const KeyframePointer& from, 
                            const KeyframePointer& to, SE3d relative_motion) {
 
-    // TODO: Are the keyframes in correct order, such that the relative_motion constrant applies between
-    // the first and last frame?
-    LoopPoseOptimizer optimizer { keyframes };
-    LoopPoseOptimizer::Poses poses { keyframes.size() };
+    PoseGraphOptimizer::Keyframes input;
 
-    LoopPoseOptimizer::Parameters parameters {
+    for (const auto& frame: keyframes) {
+        if (frame != from) {
+            input.push_back(from.get());
+        }
+    }
+
+    PoseGraphOptimizer optimizer { input };
+    PoseGraphOptimizer::Poses poses { keyframes.size() };
+
+    PoseGraphOptimizer::Parameters parameters {
         20,
         0.1
     };
 
-    Result<double> result = optimizer.Optimize(poses, false, relative_motion, parameters);
+    PoseGraphOptimizer::Constraints constraints {
+        PoseGraphOptimizer::Constraint { from.get(), to.get(), to->pose.inverse() * from->pose}
+    };
+
+    Result<double> result = optimizer.Optimize(poses, false, constraints, parameters);
 
     return poses;
 }
