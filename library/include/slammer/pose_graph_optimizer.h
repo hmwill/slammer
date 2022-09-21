@@ -59,7 +59,7 @@ public:
         double lambda;
     };
 
-    /// Pose graph constraint represntation
+    /// Pose graph constraint representation
     struct Constraint {
         /// Originating vertex in the pose graph
         Keyframe * from;
